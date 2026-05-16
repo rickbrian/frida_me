@@ -111,7 +111,7 @@ jobs:
           MACOS_CERTID: "-"
         run: |
           ./configure \
-            --prefix=/usr \
+            --prefix=/var/jb/usr \
             --host=ios-arm64e \
             --enable-server \
             -- \
@@ -139,12 +139,12 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: |
           python3 scripts/anti-anti-frida-macho.py \
-            frida-build/dist/usr/bin/frida-server \
-            frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib
+            frida-build/dist/var/jb/usr/bin/frida-server \
+            frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib
 
-          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
+          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
             python3 scripts/anti-anti-frida-macho.py \
-              frida-build/dist/usr/lib/frida-1.0/frida-helper
+              frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper
           fi
 
       # ── Re-sign ──
@@ -176,14 +176,14 @@ jobs:
 
           # frida-server needs entitlements
           codesign -f -s "-" --entitlements ent.plist \
-            frida-build/dist/usr/bin/frida-server
+            frida-build/dist/var/jb/usr/bin/frida-server
 
           codesign -f -s "-" \
-            frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib
+            frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib
 
-          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
+          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
             codesign -f -s "-" --entitlements ent.plist \
-              frida-build/dist/usr/lib/frida-1.0/frida-helper
+              frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper
           fi
 
       # ── Install dpkg (macOS doesn't have it) ──
@@ -200,29 +200,29 @@ jobs:
           mkdir -p release
 
           # 单独的二进制文件
-          cp frida-build/dist/usr/bin/frida-server release/fs17910
-          cp frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib release/fs17910d.dylib
-          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
-            cp frida-build/dist/usr/lib/frida-1.0/frida-helper release/fs17910h
+          cp frida-build/dist/var/jb/usr/bin/frida-server release/fs17910
+          cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib release/fs17910d.dylib
+          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
+            cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper release/fs17910h
           fi
 
-          # 打 .deb 包（路径里完全没有 frida）
+          # 打 .deb 包（rootless: 全部装到 /var/jb/ 下，路径无 frida）
           DEB_ROOT="deb-build"
           mkdir -p "$DEB_ROOT/DEBIAN"
-          mkdir -p "$DEB_ROOT/usr/sbin"
-          mkdir -p "$DEB_ROOT/usr/lib/fs179-1.0"
-          mkdir -p "$DEB_ROOT/Library/LaunchDaemons"
+          mkdir -p "$DEB_ROOT/var/jb/usr/sbin"
+          mkdir -p "$DEB_ROOT/var/jb/usr/lib/fs179-1.0"
+          mkdir -p "$DEB_ROOT/var/jb/Library/LaunchDaemons"
 
-          cp frida-build/dist/usr/bin/frida-server "$DEB_ROOT/usr/sbin/fs17910"
-          cp frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib "$DEB_ROOT/usr/lib/fs179-1.0/fs179-agent.dylib"
-          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
-            cp frida-build/dist/usr/lib/frida-1.0/frida-helper "$DEB_ROOT/usr/lib/fs179-1.0/fs179-helper"
-            chmod 0755 "$DEB_ROOT/usr/lib/fs179-1.0/fs179-helper"
+          cp frida-build/dist/var/jb/usr/bin/frida-server "$DEB_ROOT/var/jb/usr/sbin/fs17910"
+          cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib "$DEB_ROOT/var/jb/usr/lib/fs179-1.0/fs179-agent.dylib"
+          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
+            cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper "$DEB_ROOT/var/jb/usr/lib/fs179-1.0/fs179-helper"
+            chmod 0755 "$DEB_ROOT/var/jb/usr/lib/fs179-1.0/fs179-helper"
           fi
-          chmod 0755 "$DEB_ROOT/usr/sbin/fs17910"
+          chmod 0755 "$DEB_ROOT/var/jb/usr/sbin/fs17910"
 
           # LaunchDaemon — 安装后自动启动，重启也自动拉起
-          cat > "$DEB_ROOT/Library/LaunchDaemons/com.local.fs17910.plist" << 'PLISTEOF'
+          cat > "$DEB_ROOT/var/jb/Library/LaunchDaemons/com.local.fs17910.plist" << 'PLISTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
             "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -231,10 +231,10 @@ jobs:
             <key>Label</key>
             <string>com.local.fs17910</string>
             <key>Program</key>
-            <string>/usr/sbin/fs17910</string>
+            <string>/var/jb/usr/sbin/fs17910</string>
             <key>ProgramArguments</key>
             <array>
-              <string>/usr/sbin/fs17910</string>
+              <string>/var/jb/usr/sbin/fs17910</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
@@ -245,13 +245,13 @@ jobs:
           </dict>
           </plist>
           PLISTEOF
-          sed -i '' 's/^          //' "$DEB_ROOT/Library/LaunchDaemons/com.local.fs17910.plist"
+          sed -i '' 's/^          //' "$DEB_ROOT/var/jb/Library/LaunchDaemons/com.local.fs17910.plist"
 
           # postinst — dpkg 安装后加载 daemon
           cat > "$DEB_ROOT/DEBIAN/postinst" << 'POSTEOF'
           #!/bin/bash
-          launchctl unload /Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
-          launchctl load /Library/LaunchDaemons/com.local.fs17910.plist
+          launchctl unload /var/jb/Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
+          launchctl load /var/jb/Library/LaunchDaemons/com.local.fs17910.plist
           POSTEOF
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/postinst"
           chmod 0755 "$DEB_ROOT/DEBIAN/postinst"
@@ -259,7 +259,7 @@ jobs:
           # prerm — 卸载前停止 daemon
           cat > "$DEB_ROOT/DEBIAN/prerm" << 'PRERMEOF'
           #!/bin/bash
-          launchctl unload /Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
+          launchctl unload /var/jb/Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
           killall fs17910 2>/dev/null
           exit 0
           PRERMEOF
@@ -314,6 +314,7 @@ jobs:
 
             ### 方式一：deb 安装（推荐，装完自动启动）
             ```bash
+            # palera1n rootless 越狱
             scp fs17910_*_iphoneos-arm64.deb root@DEVICE:/var/tmp/
             ssh root@DEVICE "dpkg -i /var/tmp/fs17910_*.deb"
             # 装完即自动运行，重启设备也会自动拉起，无需手动操作
@@ -328,19 +329,23 @@ jobs:
             ```bash
             scp fs17910 fs17910d.dylib fs17910h root@DEVICE:/var/tmp/
             ssh root@DEVICE
-            mkdir -p /usr/lib/fs179-1.0
-            mv /var/tmp/fs17910d.dylib /usr/lib/fs179-1.0/fs179-agent.dylib
-            mv /var/tmp/fs17910h /usr/lib/fs179-1.0/fs179-helper
-            chmod +x /var/tmp/fs17910 /usr/lib/fs179-1.0/fs179-helper
-            /var/tmp/fs17910 --listen 0.0.0.0:8899 &
+            mkdir -p /var/jb/usr/lib/fs179-1.0
+            mv /var/tmp/fs17910d.dylib /var/jb/usr/lib/fs179-1.0/fs179-agent.dylib
+            mv /var/tmp/fs17910h /var/jb/usr/lib/fs179-1.0/fs179-helper
+            chmod +x /var/tmp/fs17910 /var/jb/usr/lib/fs179-1.0/fs179-helper
+            /var/tmp/fs17910 &
             ```
 
             ### 电脑端连接
             ```bash
+            # USB 模式（默认，推荐）
+            frida -U -f com.target.app -l script.js
+
+            # Wi-Fi 模式（需要设备端加 --listen 参数启动）
             frida -H DEVICE_IP:8899 -f com.target.app -l script.js
             ```
 
-            > ⚠️ 务必使用 `--listen 0.0.0.0:自定义端口`，默认 27042 会被检测
-            > 💡 `frida -H` 在电脑上运行，不会被设备上的 app 检测到
+            > 💡 `frida -U` / `frida -H` 在电脑上运行，不会被设备上的 app 检测到
+            > 💡 此 deb 适配 **palera1n rootless** 越狱，文件安装到 `/var/jb/` 下
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
