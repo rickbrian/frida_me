@@ -186,6 +186,11 @@ jobs:
               frida-build/dist/usr/lib/frida-1.0/frida-helper
           fi
 
+      # ── Install dpkg (macOS doesn't have it) ──
+      - name: Install dpkg
+        if: steps.check.outputs.skip != 'true'
+        run: brew install dpkg
+
       # ── Package ──
       - name: Package release assets
         if: steps.check.outputs.skip != 'true'
@@ -206,6 +211,7 @@ jobs:
           mkdir -p "$DEB_ROOT/DEBIAN"
           mkdir -p "$DEB_ROOT/usr/sbin"
           mkdir -p "$DEB_ROOT/usr/lib/fs179-1.0"
+          mkdir -p "$DEB_ROOT/Library/LaunchDaemons"
 
           cp frida-build/dist/usr/bin/frida-server "$DEB_ROOT/usr/sbin/fs17910"
           cp frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib "$DEB_ROOT/usr/lib/fs179-1.0/fs179-agent.dylib"
@@ -214,6 +220,51 @@ jobs:
             chmod 0755 "$DEB_ROOT/usr/lib/fs179-1.0/fs179-helper"
           fi
           chmod 0755 "$DEB_ROOT/usr/sbin/fs17910"
+
+          # LaunchDaemon — 安装后自动启动，重启也自动拉起
+          cat > "$DEB_ROOT/Library/LaunchDaemons/com.local.fs17910.plist" << 'PLISTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>Label</key>
+            <string>com.local.fs17910</string>
+            <key>Program</key>
+            <string>/usr/sbin/fs17910</string>
+            <key>ProgramArguments</key>
+            <array>
+              <string>/usr/sbin/fs17910</string>
+            </array>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>KeepAlive</key>
+            <true/>
+            <key>UserName</key>
+            <string>root</string>
+          </dict>
+          </plist>
+          PLISTEOF
+          sed -i '' 's/^          //' "$DEB_ROOT/Library/LaunchDaemons/com.local.fs17910.plist"
+
+          # postinst — dpkg 安装后加载 daemon
+          cat > "$DEB_ROOT/DEBIAN/postinst" << 'POSTEOF'
+          #!/bin/bash
+          launchctl unload /Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
+          launchctl load /Library/LaunchDaemons/com.local.fs17910.plist
+          POSTEOF
+          sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/postinst"
+          chmod 0755 "$DEB_ROOT/DEBIAN/postinst"
+
+          # prerm — 卸载前停止 daemon
+          cat > "$DEB_ROOT/DEBIAN/prerm" << 'PRERMEOF'
+          #!/bin/bash
+          launchctl unload /Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
+          killall fs17910 2>/dev/null
+          exit 0
+          PRERMEOF
+          sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/prerm"
+          chmod 0755 "$DEB_ROOT/DEBIAN/prerm"
 
           cat > "$DEB_ROOT/DEBIAN/control" << CTRLEOF
           Package: com.local.fs17910
@@ -224,8 +275,6 @@ jobs:
           Maintainer: local
           Section: System
           CTRLEOF
-
-          # 去掉 control 文件的前导空格
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/control"
 
           dpkg-deb -b -Zxz "$DEB_ROOT" "release/fs17910_${FRIDA_VERSION}_iphoneos-arm64.deb"
@@ -263,12 +312,16 @@ jobs:
             | `fs17910h` | helper |
             | `fs17910_*_iphoneos-arm64.deb` | 一键安装包 |
 
-            ### 方式一：deb 安装
+            ### 方式一：deb 安装（推荐，装完自动启动）
             ```bash
             scp fs17910_*_iphoneos-arm64.deb root@DEVICE:/var/tmp/
             ssh root@DEVICE "dpkg -i /var/tmp/fs17910_*.deb"
-            # 启动
-            ssh root@DEVICE "/usr/sbin/fs17910 --listen 0.0.0.0:8899 &"
+            # 装完即自动运行，重启设备也会自动拉起，无需手动操作
+            ```
+
+            卸载：
+            ```bash
+            ssh root@DEVICE "dpkg -r com.local.fs17910"
             ```
 
             ### 方式二：手动部署
