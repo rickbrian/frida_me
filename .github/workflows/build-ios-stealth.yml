@@ -240,23 +240,24 @@ jobs:
 
             ### 部署方式
             ```bash
-            # 1. 解压
-            tar xzf fs17910-server-*-ios-universal.tar.gz
-
-            # 2. 传到设备（自定义路径 + 自定义端口）
+            # 1. 从 Release 下载三个文件后传到设备
             scp fs17910 fs17910d.dylib root@DEVICE:/var/tmp/
 
-            # 3. 设备上启动（用自定义端口避免 27042 检测）
+            # 2. 设备上部署（自定义路径，避免 /usr/lib/frida-1.0 被检测）
             ssh root@DEVICE
-            mkdir -p /usr/lib/frida-1.0
-            cp /var/tmp/fs17910d.dylib /usr/lib/frida-1.0/frida-agent.dylib
+            mkdir -p /var/tmp/.fs
+            cp /var/tmp/fs17910d.dylib /var/tmp/.fs/fs17910d.dylib
+            ln -sf /var/tmp/.fs/fs17910d.dylib /usr/lib/frida-1.0/frida-agent.dylib
             chmod +x /var/tmp/fs17910
+
+            # 3. 启动（务必用自定义端口，避免 27042 被检测）
             /var/tmp/fs17910 --listen 0.0.0.0:8899 &
 
-            # 4. 从电脑连接（用自定义端口）
+            # 4. 电脑端连接（frida 客户端在电脑上运行，不影响设备检测）
             frida -H DEVICE_IP:8899 -f com.target.app -l script.js
             ```
 
             > ⚠️ 务必使用 `--listen 0.0.0.0:自定义端口`，默认 27042 端口会被检测。
+            > 💡 `frida -H` 是在你的电脑上运行的客户端命令，不在目标设备上，不会被 app 检测到。
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
