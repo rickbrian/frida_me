@@ -66,14 +66,14 @@ def process_binary(filepath):
 
     # ── 2. 文件名 / 路径名 ──
 
-    total += patch(data, b"frida-server", b"hluda-server", "frida-server(12)")
-    total += patch(data, b"frida-agent",  b"hluda-agent",  "frida-agent(11)")
-    total += patch(data, b"frida-helper", b"hluda-helper", "frida-helper(12)")
+    total += patch(data, b"frida-server", b"fs179-server", "frida-server(12)")
+    total += patch(data, b"frida-agent",  b"fs179-agent",  "frida-agent(11)")
+    total += patch(data, b"frida-helper", b"fs179-helper", "frida-helper(12)")
 
     # ── 3. 符号名风格 ──
 
-    total += patch(data, b"frida_agent", b"hluda_agent", "frida_agent(11)")
-    total += patch(data, b"frida_server", b"hluda_server", "frida_server(12)")
+    total += patch(data, b"frida_agent", b"fs179_agent", "frida_agent(11)")
+    total += patch(data, b"frida_server", b"fs179_server", "frida_server(12)")
 
     # ── 4. Bundle ID / 服务标识 ──
 
