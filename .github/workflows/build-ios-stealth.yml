@@ -250,6 +250,8 @@ jobs:
           # postinst — dpkg 安装后加载 daemon
           cat > "$DEB_ROOT/DEBIAN/postinst" << 'POSTEOF'
           #!/bin/bash
+          chown root:wheel /var/jb/Library/LaunchDaemons/com.local.fs17910.plist
+          chmod 644 /var/jb/Library/LaunchDaemons/com.local.fs17910.plist
           launchctl unload /var/jb/Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
           launchctl load /var/jb/Library/LaunchDaemons/com.local.fs17910.plist
           POSTEOF
