@@ -4,3 +4,5 @@
 /releng/modules/frida-gadget-ios/*.dylib
 /releng/modules/frida-gadget-ios/node_modules
 /subprojects/*
+IOS_STEALTH_PATCHES.md
+STEALTH_PATCHES.md
