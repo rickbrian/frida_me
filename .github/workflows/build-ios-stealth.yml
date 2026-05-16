@@ -106,6 +106,9 @@ jobs:
       - name: Configure
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
+        env:
+          IOS_CERTID: "-"
+          MACOS_CERTID: "-"
         run: |
           ./configure \
             --prefix=/usr \
@@ -118,11 +121,17 @@ jobs:
       - name: Build
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
+        env:
+          IOS_CERTID: "-"
+          MACOS_CERTID: "-"
         run: make -j$(sysctl -n hw.ncpu)
 
       - name: Install to staging
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
+        env:
+          IOS_CERTID: "-"
+          MACOS_CERTID: "-"
         run: DESTDIR="$PWD/dist" make install
 
       # ── Post-build binary patching ──
