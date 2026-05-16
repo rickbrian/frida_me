@@ -51,8 +51,8 @@ def process_binary(filepath):
         data = bytearray(f.read())
 
     total = 0
-    r5 = rand_str(5)
-    r5u = rand_str(5, string.ascii_uppercase)
+    r5 = "fs179"
+    r5u = "FS179"
 
     # ── 1. 线程名（source 级已改，这里兜底 GLib 内部残留） ──
 

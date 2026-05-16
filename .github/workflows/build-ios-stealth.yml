@@ -194,11 +194,41 @@ jobs:
         run: |
           mkdir -p release
 
+          # 单独的二进制文件
           cp frida-build/dist/usr/bin/frida-server release/fs17910
           cp frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib release/fs17910d.dylib
           if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
             cp frida-build/dist/usr/lib/frida-1.0/frida-helper release/fs17910h
           fi
+
+          # 打 .deb 包（路径里完全没有 frida）
+          DEB_ROOT="deb-build"
+          mkdir -p "$DEB_ROOT/DEBIAN"
+          mkdir -p "$DEB_ROOT/usr/sbin"
+          mkdir -p "$DEB_ROOT/usr/lib/fs179-1.0"
+
+          cp frida-build/dist/usr/bin/frida-server "$DEB_ROOT/usr/sbin/fs17910"
+          cp frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib "$DEB_ROOT/usr/lib/fs179-1.0/fs179-agent.dylib"
+          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
+            cp frida-build/dist/usr/lib/frida-1.0/frida-helper "$DEB_ROOT/usr/lib/fs179-1.0/fs179-helper"
+            chmod 0755 "$DEB_ROOT/usr/lib/fs179-1.0/fs179-helper"
+          fi
+          chmod 0755 "$DEB_ROOT/usr/sbin/fs17910"
+
+          cat > "$DEB_ROOT/DEBIAN/control" << CTRLEOF
+          Package: com.local.fs17910
+          Name: fs17910
+          Version: ${FRIDA_VERSION}
+          Architecture: iphoneos-arm64
+          Description: system service daemon
+          Maintainer: local
+          Section: System
+          CTRLEOF
+
+          # 去掉 control 文件的前导空格
+          sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/control"
+
+          dpkg-deb -b -Zxz "$DEB_ROOT" "release/fs17910_${FRIDA_VERSION}_iphoneos-arm64.deb"
 
       # ── Upload + Release ──
       - name: Upload build artifact
@@ -206,7 +236,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: fs17910-ios-stealth
-          path: release/fs17910-*
+          path: release/*
 
       - name: Create GitHub Release
         if: steps.check.outputs.skip != 'true'
@@ -215,49 +245,49 @@ jobs:
           tag_name: "${{ steps.frida.outputs.version }}-ios-stealth"
           name: "Stealth Frida ${{ steps.frida.outputs.version }} for iOS"
           prerelease: false
-          files: release/fs17910-*
+          files: |
+            release/fs17910
+            release/fs17910d.dylib
+            release/fs17910h
+            release/*.deb
           body: |
             ## iOS Stealth Frida Server
 
-            基于 Frida **${{ steps.frida.outputs.version }}**，包含以下隐身改动：
+            基于 Frida **${{ steps.frida.outputs.version }}**
 
-            ### 源码级改动
-            - `frida:rpc` 协议字符串 → base64 双重编码（运行时兼容官方客户端）
-            - `frida_agent_main` 符号 → `main`
-            - `g_set_prgname("frida")` → `com.apple.WebKit`（消除 `pool-frida` 线程）
-            - `gum-js-loop` 线程 → `com.apple.CFSocket.private`
-            - `frida-eternal-agent` / `frida-agent-emulated` → `com.apple.CFStream`
-            - `frida-generate-certificate` → `com.apple.securityd`
-            - Agent dylib 名称随机化
-            - ExitMonitor 默认禁用（去掉 exit/abort 的 inline hook，消除 rwxp 段）
+            ### 文件说明
+            | 文件 | 说明 |
+            |---|---|
+            | `fs17910` | server 主程序 |
+            | `fs17910d.dylib` | agent 动态库 |
+            | `fs17910h` | helper |
+            | `fs17910_*_iphoneos-arm64.deb` | 一键安装包 |
 
-            ### 二进制级改动
-            - `frida-server` / `frida-agent` / `frida-helper` 名称 → `fs17910` / `fs17910d` / `fs17910h`
-            - `re.frida.server` → 随机标识
-            - `FridaScriptEngine`, `GDBusProxy`, `GumScript`, `GLib-GIO` → 反转
-            - 剩余 `frida` / `FRIDA` 字符串 → 随机替换
-            - `gmain`, `gdbus` 线程名 → 随机
-
-            ### 部署方式
+            ### 方式一：deb 安装
             ```bash
-            # 1. 从 Release 下载三个文件后传到设备
-            scp fs17910 fs17910d.dylib root@DEVICE:/var/tmp/
+            scp fs17910_*_iphoneos-arm64.deb root@DEVICE:/var/tmp/
+            ssh root@DEVICE "dpkg -i /var/tmp/fs17910_*.deb"
+            # 启动
+            ssh root@DEVICE "/usr/sbin/fs17910 --listen 0.0.0.0:8899 &"
+            ```
 
-            # 2. 设备上部署（自定义路径，避免 /usr/lib/frida-1.0 被检测）
+            ### 方式二：手动部署
+            ```bash
+            scp fs17910 fs17910d.dylib fs17910h root@DEVICE:/var/tmp/
             ssh root@DEVICE
-            mkdir -p /var/tmp/.fs
-            cp /var/tmp/fs17910d.dylib /var/tmp/.fs/fs17910d.dylib
-            ln -sf /var/tmp/.fs/fs17910d.dylib /usr/lib/frida-1.0/frida-agent.dylib
-            chmod +x /var/tmp/fs17910
-
-            # 3. 启动（务必用自定义端口，避免 27042 被检测）
+            mkdir -p /usr/lib/fs179-1.0
+            mv /var/tmp/fs17910d.dylib /usr/lib/fs179-1.0/fs179-agent.dylib
+            mv /var/tmp/fs17910h /usr/lib/fs179-1.0/fs179-helper
+            chmod +x /var/tmp/fs17910 /usr/lib/fs179-1.0/fs179-helper
             /var/tmp/fs17910 --listen 0.0.0.0:8899 &
+            ```
 
-            # 4. 电脑端连接（frida 客户端在电脑上运行，不影响设备检测）
+            ### 电脑端连接
+            ```bash
             frida -H DEVICE_IP:8899 -f com.target.app -l script.js
             ```
 
-            > ⚠️ 务必使用 `--listen 0.0.0.0:自定义端口`，默认 27042 端口会被检测。
-            > 💡 `frida -H` 是在你的电脑上运行的客户端命令，不在目标设备上，不会被 app 检测到。
+            > ⚠️ 务必使用 `--listen 0.0.0.0:自定义端口`，默认 27042 会被检测
+            > 💡 `frida -H` 在电脑上运行，不会被设备上的 app 检测到
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
