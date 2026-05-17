@@ -58,13 +58,15 @@ def process_binary(filepath):
     total += patch(data, b"gdbus\x00", b"IOSvc\x00", "gdbus(6)")
     total += patch(data, b"pool-frida\x00", b"pool-cfrun\x00", "pool-frida(11)")
     total += patch(data, b"frida-main-loop\x00", b"CFRunLoopThread\x00", "frida-main-loop(16)")
+    total += patch(data, b"frida-server-main-loop\x00", b"com.apple.dt.remotesvc\x00", "frida-server-main-loop(23)")
 
-    # ── 2. 文件路径 / 进程名（app 可通过 fs/procfs/dyld 发现） ──
+    # ── 2. 文件路径 / 进程名 / 目录名（app 可通过 fs/dyld 发现） ──
 
     total += patch(data, b"frida-server\x00", b"fs179-server\x00", "frida-server(13)")
     total += patch(data, b"frida-agent.dylib", b"fs179-agent.dylib", "frida-agent.dylib(17)")
     total += patch(data, b"frida-helper\x00", b"fs179-helper\x00", "frida-helper(13)")
     total += patch(data, b"frida-1.0", b"fs179-1.0", "frida-1.0(9)")
+    total += patch(data, b"re.frida.server\x00", b"com.apple.instd\x00", "re.frida.server(16)")
 
     # ── 3. 导出符号（server 用 dlsym 查找 agent 入口点） ──
     #    server 和 agent.dylib 都会被本脚本处理，保持一致

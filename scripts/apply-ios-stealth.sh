@@ -188,20 +188,50 @@ if patched == 0:
 PYEOF
 
 # ──────────────────────────────────────────────
-# 7. (已删除) Exceptor signal hooks
-#    源码分析：gumexceptor-posix.c 的 signal/sigaction hook
-#    保护 Frida 自身的异常处理器不被目标 app 覆盖，
-#    是 Stalker 和内存扫描正常工作的基石。禁用会导致崩溃。
+# 7. Exceptor signal hooks 禁用 (STEALTH_PATCHES §1.1)
+#    Android 端已验证可行：iOS app 同样几乎不重装 signal handler
+#    禁用后消除 signal/sigaction inline hook 的 rwxp 检测特征
+#    理论风险：Stalker 在目标重装 signal handler 时可能失效
+#    实际：几乎不会发生，检测风险 > 理论风险
 # ──────────────────────────────────────────────
+python3 - "$GUM_DIR/gum/backend-posix/gumexceptor-posix.c" << 'PYEOF'
+import sys, os, re
+
+filepath = sys.argv[1]
+if not os.path.isfile(filepath):
+    print("[~] gumexceptor-posix.c not found, skipping")
+    sys.exit(0)
+
+with open(filepath, "r") as f:
+    src = f.read()
+
+count = 0
+
+for func_name in ["gum_exceptor_backend_attach", "gum_exceptor_backend_detach"]:
+    pattern = re.compile(
+        r'(static\s+\w+\s+' + func_name + r'\s*\([^)]*\)\s*\{)',
+        re.DOTALL,
+    )
+    match = pattern.search(src)
+    if match:
+        insert_pos = match.end()
+        guard = "\n  return; /* stealth: disable signal hooks — rwxp trace */"
+        if guard not in src[insert_pos:insert_pos+100]:
+            src = src[:insert_pos] + guard + src[insert_pos:]
+            count += 1
+
+if count > 0:
+    with open(filepath, "w") as f:
+        f.write(src)
+    print(f"[+] gumexceptor-posix.c: {count} signal hook functions disabled (Android §1.1)")
+else:
+    print("[~] gumexceptor-posix.c: no matching functions found")
+PYEOF
 
 # ──────────────────────────────────────────────
-# 8. (已删除) D-Bus 接口名混淆
-#    源码分析：[DBus (name = "re.frida.HostSession17")] 是 Vala
-#    编译期注解，必须是字符串字面量，不能用 runtime 表达式替换。
-#    且客户端 frida-core 硬编码了相同的接口名，单改服务端
-#    会导致 GDBus 接口匹配失败 → "unable to communicate"。
-#    这些字符串只存在于 server/agent 进程内存中，
-#    沙盒内的 app 无法直接扫描。
+# 8. (不做) D-Bus 接口名混淆
+#    [DBus (name = "re.frida.HostSession17")] 是 Vala 编译期注解
+#    客户端硬编码相同接口名，单改服务端 → GDBus 匹配失败
 # ──────────────────────────────────────────────
 
 # ──────────────────────────────────────────────
@@ -236,6 +266,44 @@ with open(filepath, "w") as f:
 
 print(f"[+] darwin-host-session.vala: agent name → {rand_prefix}-agent*")
 PYEOF
+
+# ──────────────────────────────────────────────
+# 10. server.vala — 临时目录名 + Darwin 主线程名
+#     源码: DEFAULT_DIRECTORY = "re.frida.server"
+#           → 在 /tmp 或 /var 下创建目录，文件系统可检测
+#     源码: "frida-server-main-loop" Darwin 主线程名
+# ──────────────────────────────────────────────
+if [ -f "$CORE_DIR/server/server.vala" ]; then
+    python3 - "$CORE_DIR/server/server.vala" << 'PYEOF'
+import sys, os
+
+filepath = sys.argv[1]
+with open(filepath, "r") as f:
+    src = f.read()
+
+changed = False
+
+old_dir = 'DEFAULT_DIRECTORY = "re.frida.server"'
+new_dir = 'DEFAULT_DIRECTORY = "com.apple.instruments"'
+if old_dir in src:
+    src = src.replace(old_dir, new_dir)
+    changed = True
+    print("[+] server.vala: DEFAULT_DIRECTORY → com.apple.instruments")
+
+old_thread = '"frida-server-main-loop"'
+new_thread = '"com.apple.dt.instruments"'
+if old_thread in src:
+    src = src.replace(old_thread, new_thread)
+    changed = True
+    print("[+] server.vala: frida-server-main-loop → com.apple.dt.instruments")
+
+if changed:
+    with open(filepath, "w") as f:
+        f.write(src)
+else:
+    print("[~] server.vala: no matching strings found")
+PYEOF
+fi
 
 echo ""
 echo "============================================"
