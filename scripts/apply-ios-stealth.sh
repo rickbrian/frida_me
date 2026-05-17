@@ -235,6 +235,81 @@ PYEOF
 # ──────────────────────────────────────────────
 
 # ──────────────────────────────────────────────
+# 8.5 Stalker arm64 ctx 分配 ASLR fix (STEALTH_PATCHES §6)
+#     gum_exec_ctx_new 中 gum_memory_allocate(NULL, ctx_size, ...)
+#     ASLR 可能把 ctx 放在附近无足够空隙的地址
+#     后续 gum_memory_allocate_near 分 slab 全部失败
+#     修复：先 reserve 大块找到好的 hole，再在中心分配
+# ──────────────────────────────────────────────
+python3 - "$GUM_DIR/gum/backend-arm64/gumstalker-arm64.c" << 'PYEOF'
+import sys, os, re
+
+filepath = sys.argv[1]
+if not os.path.isfile(filepath):
+    print("[~] gumstalker-arm64.c not found, skipping Stalker ASLR fix")
+    sys.exit(0)
+
+with open(filepath, "r") as f:
+    src = f.read()
+
+old_pattern = re.compile(
+    r'(ctx\s*=\s*(?:\([^)]*\)\s*)?)gum_memory_allocate\s*\(\s*NULL\s*,\s*stalker->ctx_size\s*,'
+    r'\s*stalker->page_size\s*,\s*'
+    r'stalker->is_rwx_supported\s*\?\s*GUM_PAGE_RWX\s*:\s*GUM_PAGE_RW\s*\)',
+    re.DOTALL,
+)
+
+match = old_pattern.search(src)
+if match:
+    cast_prefix = match.group(1) or "ctx = "
+    replacement = """{cast_prefix}({type_cast}gum_stalker_aslr_alloc (stalker))""".format(
+        cast_prefix=cast_prefix,
+        type_cast="",
+    )
+
+    helper_func = r"""
+/* stealth: ASLR-aware ctx allocation (STEALTH_PATCHES §6) */
+static gpointer
+gum_stalker_aslr_alloc (GumStalker * stalker)
+{
+  gpointer base;
+
+  base = gum_memory_allocate (NULL, G_MAXINT32, stalker->page_size,
+      GUM_PAGE_RW);
+  gum_memory_free (base, G_MAXINT32);
+
+  return gum_memory_allocate (
+      (guint8 *) base + G_MAXINT32 / 2,
+      stalker->ctx_size,
+      stalker->page_size,
+      stalker->is_rwx_supported ? GUM_PAGE_RWX : GUM_PAGE_RW);
+}
+
+"""
+
+    func_decl = "static gpointer gum_stalker_aslr_alloc (GumStalker * stalker);\n"
+
+    src = src[:match.start()] + replacement + src[match.end():]
+
+    run_main_loop_pos = src.find("\nstatic gpointer\ngum_exec_ctx_new")
+    if run_main_loop_pos == -1:
+        run_main_loop_pos = src.find("static GumExecCtx *\ngum_exec_ctx_new")
+    if run_main_loop_pos != -1:
+        src = src[:run_main_loop_pos] + "\n" + helper_func + src[run_main_loop_pos:]
+
+    first_static = src.find("static void gum_stalker_")
+    if first_static != -1:
+        line_start = src.rfind("\n", 0, first_static) + 1
+        src = src[:line_start] + func_decl + src[line_start:]
+
+    with open(filepath, "w") as f:
+        f.write(src)
+    print("[+] gumstalker-arm64.c: Stalker ASLR fix applied (§6)")
+else:
+    print("[~] gumstalker-arm64.c: allocation pattern not found (may already be fixed)")
+PYEOF
+
+# ──────────────────────────────────────────────
 # 9. Agent dylib 临时文件名随机化
 # ──────────────────────────────────────────────
 python3 - "$CORE_DIR/src/darwin/darwin-host-session.vala" << 'PYEOF'
