@@ -56,7 +56,7 @@ def process_binary(filepath):
     #    这些是"外部可见"的，必须替换
     # ═══════════════════════════════════════════════════════════════
 
-    total += patch(data, b"gum-js-loop\x00", b"CFRunLoopRun\x00", "gum-js-loop(12)")
+    total += patch(data, b"gum-js-loop\x00", b"RunLoopMain\x00", "gum-js-loop(12)")
     total += patch(data, b"gmain\x00", b"GCDwk\x00", "gmain(null-term)")
     total += patch(data, b"gdbus\x00", b"IOSvc\x00", "gdbus(null-term)")
     total += patch(data, b"pool-frida\x00", b"pool-cfrun\x00", "pool-frida(11)")
