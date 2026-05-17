@@ -144,7 +144,7 @@ def process_binary(filepath):
     # ── 4. 可识别内部字符串（同长度中性替换，不反转） ──
 
     total += patch(data, b"FridaScriptEngine", b"NativeJSRuntime\x00\x00", "FridaScriptEngine(17)")
-    total += patch(data, b"GumScript", b"JsEngine", "GumScript→JsEngine(9)")
+    total += patch(data, b"GumScript", b"JsRuntime", "GumScript(9)")
 
     # ── 5. 上下文感知的全局 frida/FRIDA 替换 ──
     #    跳过 D-Bus 接口名 (re.frida.*) 和 Mach 服务名 (com.frida.*)
