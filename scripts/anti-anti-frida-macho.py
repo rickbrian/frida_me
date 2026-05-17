@@ -73,6 +73,32 @@ def process_binary(filepath):
 
     total += patch(data, b"frida_agent_main", b"fs179_agent_main", "frida_agent_main(16)")
 
+    # ── 4. Mach-O segment 名（__FRIDA_DATA / __FRIDA_TEXT 兜底） ──
+    #    源码级已改为 __GUM_*，此处兜底处理漏网之鱼
+    #    注意：segment name 在 Mach-O load command 中是 16 字节定长字段
+    #    __FRIDA_DATA 和 __FRIDA_TEXT 都是 12 字节 + padding
+
+    total += patch(data, b"__FRIDA_DATA", b"__CFGUM_DATA", "__FRIDA_DATA(12)")
+    total += patch(data, b"__FRIDA_TEXT", b"__CFGUM_TEXT", "__FRIDA_TEXT(12)")
+    total += patch(data, b"__FRIDA_", b"__CFGUM_", "__FRIDA_(8)")
+
+    # ── 5. GType 名前缀（GLib 类型系统注册名） ──
+    #    Vala 编译器自动生成 "FridaXxxYyy" 前缀的 GType 名
+    #    这些名字通过 g_type_register_static 注册到 GLib 类型系统
+    #    它们只在进程内部用于 GObject introspection，不影响 D-Bus 协议
+    #    被注入 app 可以 g_type_from_name("FridaAgentSession") 检测
+    #    等长替换 "Frida" → "Cgent" (5 字节, 避开 "Agent" 等常见词)
+
+    total += patch(data, b"FridaAgent", b"CgentAgent", "FridaAgent→CgentAgent")
+    total += patch(data, b"FridaScript", b"CgentScript", "FridaScript→CgentScript")
+    total += patch(data, b"FridaSession", b"CgentSession", "FridaSession→CgentSession")
+    total += patch(data, b"FridaPortal", b"CgentPortal", "FridaPortal→CgentPortal")
+    total += patch(data, b"FridaBus", b"CgentBus", "FridaBus→CgentBus")
+
+    # ── 6. error-quark 字符串（兜底，源码级已 base64 混淆） ──
+
+    total += patch(data, b"frida-error-quark\x00", b"cgent-error-quark\x00", "frida-error-quark(18)")
+
     # ── 不做的事（源码分析依据） ──
     #
     # D-Bus 接口名 "re.frida.HostSession17" 等:

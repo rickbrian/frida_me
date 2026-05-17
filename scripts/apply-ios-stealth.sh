@@ -380,6 +380,125 @@ else:
 PYEOF
 fi
 
+# ──────────────────────────────────────────────
+# 11. __FRIDA_DATA / __FRIDA_TEXT segment 重命名 (IOS §10)
+#     gumdarwingrafter.c 在 graft 时给 Mach-O 添加 __FRIDA_TEXT%u / __FRIDA_DATA%u segment
+#     guminterceptor-arm64.c 在运行时用 g_str_has_prefix("__FRIDA_DATA") 识别
+#     两端同步改为 __GUM_TEXT%u / __GUM_DATA%u
+# ──────────────────────────────────────────────
+python3 - "$GUM_DIR" << 'PYEOF'
+import sys, os
+
+gum_dir = sys.argv[1]
+count = 0
+
+grafter = os.path.join(gum_dir, "gum", "gumdarwingrafter.c")
+if os.path.isfile(grafter):
+    with open(grafter, "r") as f:
+        src = f.read()
+    src = src.replace('g_str_has_prefix (segment->name, "__FRIDA_")', 'g_str_has_prefix (segment->name, "__GUM_")')
+    src = src.replace('"__FRIDA_TEXT%u"', '"__GUM_TEXT%u"')
+    src = src.replace('"__FRIDA_DATA%u"', '"__GUM_DATA%u"')
+    with open(grafter, "w") as f:
+        f.write(src)
+    count += 1
+    print("[+] gumdarwingrafter.c: __FRIDA_TEXT/DATA → __GUM_TEXT/DATA")
+
+interceptor = os.path.join(gum_dir, "gum", "backend-arm64", "guminterceptor-arm64.c")
+if os.path.isfile(interceptor):
+    with open(interceptor, "r") as f:
+        src = f.read()
+    src = src.replace('g_str_has_prefix (sc->segname, "__FRIDA_DATA")', 'g_str_has_prefix (sc->segname, "__GUM_DATA")')
+    with open(interceptor, "w") as f:
+        f.write(src)
+    count += 1
+    print("[+] guminterceptor-arm64.c: __FRIDA_DATA → __GUM_DATA")
+
+if count == 0:
+    print("[~] __FRIDA segment rename: no matching files found")
+PYEOF
+
+# ──────────────────────────────────────────────
+# 12. STUN SOFTWARE 属性隐藏 (IOS §11)
+#     session.vala: agent.set_software ("Frida") → 空字符串
+#     libnice STUN 协议的 SOFTWARE 属性会泄露 "Frida" 到网络流量
+# ──────────────────────────────────────────────
+if [ -f "$CORE_DIR/lib/base/session.vala" ]; then
+    python3 - "$CORE_DIR/lib/base/session.vala" << 'PYEOF'
+import sys, os
+
+filepath = sys.argv[1]
+with open(filepath, "r") as f:
+    src = f.read()
+
+old = 'agent.set_software ("Frida")'
+new = 'agent.set_software ("")'
+if old in src:
+    src = src.replace(old, new)
+    with open(filepath, "w") as f:
+        f.write(src)
+    print("[+] session.vala: STUN SOFTWARE attribute cleared (was 'Frida')")
+else:
+    print("[~] session.vala: set_software pattern not found")
+PYEOF
+fi
+
+# ──────────────────────────────────────────────
+# 13. pages_per_batch 随机化 (IOS §12)
+#     gumcodeallocator.c: pages_per_batch = 7 是 Frida 固定特征
+#     正常 app 几乎不会有 7 页一批的匿名 r-x 映射
+#     随机化为 5~13 的奇数，打破特征指纹
+# ──────────────────────────────────────────────
+python3 - "$GUM_DIR/gum/gumcodeallocator.c" << 'PYEOF'
+import sys, os, random
+
+filepath = sys.argv[1]
+if not os.path.isfile(filepath):
+    print("[~] gumcodeallocator.c not found, skipping")
+    sys.exit(0)
+
+with open(filepath, "r") as f:
+    src = f.read()
+
+old = "allocator->pages_per_batch = 7;"
+if old in src:
+    new_val = random.choice([5, 9, 11, 13])
+    new = f"allocator->pages_per_batch = {new_val};"
+    src = src.replace(old, new)
+    with open(filepath, "w") as f:
+        f.write(src)
+    print(f"[+] gumcodeallocator.c: pages_per_batch = {new_val} (was 7)")
+else:
+    print("[~] gumcodeallocator.c: pages_per_batch pattern not found")
+PYEOF
+
+# ──────────────────────────────────────────────
+# 14. frida-error-quark 字符串混淆 (IOS §13)
+#     xpc.vala 中硬编码 "frida-error-quark" — 明文在二进制中可搜
+#     改为 base64 解码
+# ──────────────────────────────────────────────
+python3 - "$CORE_DIR/lib/base/xpc.vala" << 'PYEOF'
+import sys, os
+
+filepath = sys.argv[1]
+if not os.path.isfile(filepath):
+    print("[~] xpc.vala not found, skipping")
+    sys.exit(0)
+
+with open(filepath, "r") as f:
+    src = f.read()
+
+old = 'Quark.from_string ("frida-error-quark")'
+new = 'Quark.from_string ((string) GLib.Base64.decode ("ZnJpZGEtZXJyb3ItcXVhcmsA"))'
+if old in src:
+    src = src.replace(old, new)
+    with open(filepath, "w") as f:
+        f.write(src)
+    print("[+] xpc.vala: frida-error-quark → base64 obfuscation")
+else:
+    print("[~] xpc.vala: frida-error-quark pattern not found")
+PYEOF
+
 echo ""
 echo "============================================"
 echo " All source patches applied successfully"
