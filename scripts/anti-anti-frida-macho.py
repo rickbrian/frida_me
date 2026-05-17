@@ -146,12 +146,15 @@ def process_binary(filepath):
     total += patch(data, b"FridaScriptEngine", b"NativeJSRuntime\x00\x00", "FridaScriptEngine(17)")
     total += patch(data, b"GumScript", b"JsRuntime", "GumScript(9)")
 
-    # ── 5. 上下文感知的全局 frida/FRIDA 替换 ──
-    #    跳过 D-Bus 接口名 (re.frida.*) 和 Mach 服务名 (com.frida.*)
-    #    这些是客户端-服务端通信必需的，改了就断
-
-    total += smart_patch_frida(data)
-    total += smart_patch_FRIDA(data)
+    # ── 5. 全局 frida/FRIDA 替换已移除 ──
+    #    实测：即使跳过 re.frida.*/com.frida.* 仍然破坏通信
+    #    Frida 内部还有大量 frida_ 前缀的函数名、消息类型、属性名
+    #    用于客户端-服务端 D-Bus 协议，无法枚举所有保护项
+    #    结论：只做上面的精确替换，不做全局替换
+    #
+    #    剩余 "frida" 字符串仅存在于 server/agent 进程内存中
+    #    app 无法扫描其他进程的内存（沙盒隔离）
+    #    D-Bus 接口名已在源码层 base64 混淆（apply-ios-stealth.sh §8）
 
     with open(filepath, "wb") as f:
         f.write(data)
