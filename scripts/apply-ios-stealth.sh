@@ -57,7 +57,7 @@ with open(filepath, "r") as f:
 
 helper = """
 \t\tprivate static string _rpc_tag () {
-\t\t\treturn (string) GLib.Base64.decode ((string) GLib.Base64.decode ("Wm5KcFpHRTZjbkJq"));
+\t\t\treturn (string) GLib.Base64.decode ("ZnJpZGE6cnBjAA==");
 \t\t}
 """
 
@@ -85,11 +85,11 @@ print("[+] rpc.vala: frida:rpc → base64 obfuscation (runtime compatible)")
 PYEOF
 
 # ──────────────────────────────────────────────
-# 4. frida-glue.c g_set_prgname
+# 4. frida-glue.c — g_set_prgname + 主循环线程名
 # ──────────────────────────────────────────────
 if [ -f "$CORE_DIR/src/frida-glue.c" ]; then
     python3 - "$CORE_DIR/src/frida-glue.c" << 'PYEOF'
-import sys, os
+import sys, os, re
 
 filepath = sys.argv[1]
 with open(filepath, "r") as f:
@@ -104,17 +104,19 @@ if 'g_set_prgname' not in src:
             break
     src = '\n'.join(lines)
 else:
-    import re
     src = re.sub(
         r'g_set_prgname\s*\(\s*"[^"]*"\s*\)',
         'g_set_prgname ("com.apple.WebKit")',
         src,
     )
 
+src = src.replace('"frida-main-loop"', '"com.apple.runloop"')
+
 with open(filepath, "w") as f:
     f.write(src)
 
 print("[+] frida-glue.c: g_set_prgname → com.apple.WebKit")
+print("[+] frida-glue.c: frida-main-loop → com.apple.runloop")
 PYEOF
 fi
 
@@ -186,96 +188,21 @@ if patched == 0:
 PYEOF
 
 # ──────────────────────────────────────────────
-# 7. Exceptor signal hooks 禁用 (STEALTH_PATCHES §1.1)
-#    gumexceptor-posix.c 的 signal/sigaction hook
-#    在 iOS 上会留下 inline hook 的 rwxp 痕迹
+# 7. (已删除) Exceptor signal hooks
+#    源码分析：gumexceptor-posix.c 的 signal/sigaction hook
+#    保护 Frida 自身的异常处理器不被目标 app 覆盖，
+#    是 Stalker 和内存扫描正常工作的基石。禁用会导致崩溃。
 # ──────────────────────────────────────────────
-python3 - "$GUM_DIR/gum/backend-posix/gumexceptor-posix.c" << 'PYEOF'
-import sys, os, re
-
-filepath = sys.argv[1]
-if not os.path.isfile(filepath):
-    print("[~] gumexceptor-posix.c not found, skipping")
-    sys.exit(0)
-
-with open(filepath, "r") as f:
-    src = f.read()
-
-count = 0
-
-for func_name in ["gum_exceptor_backend_attach", "gum_exceptor_backend_detach"]:
-    pattern = re.compile(
-        r'(static\s+\w+\s+' + func_name + r'\s*\([^)]*\)\s*\{)',
-        re.DOTALL,
-    )
-    match = pattern.search(src)
-    if match:
-        insert_pos = match.end()
-        guard = "\n  return; /* stealth: disable signal hooks */"
-        if guard not in src[insert_pos:insert_pos+100]:
-            src = src[:insert_pos] + guard + src[insert_pos:]
-            count += 1
-
-if count > 0:
-    with open(filepath, "w") as f:
-        f.write(src)
-    print(f"[+] gumexceptor-posix.c: {count} signal hook functions disabled")
-else:
-    print("[~] gumexceptor-posix.c: no matching functions found")
-PYEOF
 
 # ──────────────────────────────────────────────
-# 8. D-Bus 接口名混淆 — 二进制中不出现 "re.frida." 明文
-#    运行时用 base64 还原，兼容官方客户端
+# 8. (已删除) D-Bus 接口名混淆
+#    源码分析：[DBus (name = "re.frida.HostSession17")] 是 Vala
+#    编译期注解，必须是字符串字面量，不能用 runtime 表达式替换。
+#    且客户端 frida-core 硬编码了相同的接口名，单改服务端
+#    会导致 GDBus 接口匹配失败 → "unable to communicate"。
+#    这些字符串只存在于 server/agent 进程内存中，
+#    沙盒内的 app 无法直接扫描。
 # ──────────────────────────────────────────────
-python3 - "$CORE_DIR" << 'PYEOF'
-import sys, os, base64, re
-
-core_dir = sys.argv[1]
-
-iface_map = {
-    "re.frida.HostSession": None,
-    "re.frida.AgentSession": None,
-    "re.frida.AgentController": None,
-    "re.frida.TransportBroker": None,
-    "re.frida.PortalSession": None,
-    "re.frida.BusSession": None,
-    "re.frida.AuthenticationService": None,
-}
-
-for name in iface_map:
-    b64 = base64.b64encode(name.encode()).decode()
-    iface_map[name] = b64
-
-patched_files = 0
-for root, dirs, files in os.walk(core_dir):
-    dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "build")]
-    for fname in files:
-        if not fname.endswith(".vala"):
-            continue
-        fpath = os.path.join(root, fname)
-        with open(fpath, "r") as f:
-            src = f.read()
-
-        changed = False
-        for iface_name, b64 in iface_map.items():
-            old = f'"{iface_name}"'
-            new = f'(string) GLib.Base64.decode ("{b64}")'
-            if old in src:
-                src = src.replace(old, new)
-                changed = True
-
-        if changed:
-            with open(fpath, "w") as f:
-                f.write(src)
-            patched_files += 1
-            print(f"[+] {os.path.relpath(fpath, core_dir)}: D-Bus interface names → base64")
-
-if patched_files == 0:
-    print("[~] D-Bus interface obfuscation: no matching .vala files found")
-else:
-    print(f"[+] D-Bus interface obfuscation: {patched_files} files patched")
-PYEOF
 
 # ──────────────────────────────────────────────
 # 9. Agent dylib 临时文件名随机化
