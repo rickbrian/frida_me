@@ -92,26 +92,7 @@ if [ -f "$CORE_DIR/lib/base/p2p.vala" ]; then
 fi
 
 # ──────────────────────────────────────────────
-# 6. frida_agent_main 符号名 → main
-#    覆盖所有平台的 host-session + agent-container
-# ──────────────────────────────────────────────
-for f in \
-    "$CORE_DIR/src/agent-container.vala" \
-    "$CORE_DIR/src/darwin/darwin-host-session.vala" \
-    "$CORE_DIR/src/linux/linux-host-session.vala" \
-    "$CORE_DIR/src/freebsd/freebsd-host-session.vala" \
-    "$CORE_DIR/src/qnx/qnx-host-session.vala" \
-    "$CORE_DIR/src/windows/windows-host-session.vala" \
-    "$CORE_DIR/tests/test-agent.vala" \
-    "$CORE_DIR/tests/test-injector.vala"; do
-    if [ -f "$f" ]; then
-        sed -i '' 's/"frida_agent_main"/"main"/' "$f"
-        echo "[+] $(basename "$f"): frida_agent_main → main"
-    fi
-done
-
-# ──────────────────────────────────────────────
-# 7. frida-core: frida-glue.c g_set_prgname
+# 6. frida-core: frida-glue.c g_set_prgname
 # ──────────────────────────────────────────────
 if [ -f "$CORE_DIR/src/frida-glue.c" ]; then
     python3 - "$CORE_DIR/src/frida-glue.c" << 'PYEOF'
@@ -145,11 +126,11 @@ PYEOF
 fi
 
 # ──────────────────────────────────────────────
-# 8. frida-core: 禁用 ExitMonitor（去掉 exit/abort 的 inline hook）
-#    在 iOS 上这些 hook 会在 maps 里留下 rwxp 段
+# 7. frida-core: 禁用 ExitMonitor（去掉 exit/abort 的 inline hook）
+#    在 iOS 上这些 hook 会在 maps 里留下 rwxp 段，被检测到
 # ──────────────────────────────────────────────
 python3 - "$CORE_DIR/lib/agent/agent.vala" << 'PYEOF'
-import sys, os, re
+import sys, os
 
 filepath = sys.argv[1]
 if not os.path.isfile(filepath):
@@ -174,8 +155,7 @@ print("[+] agent.vala: ExitMonitor disabled (no rwxp from exit/abort hooks)")
 PYEOF
 
 # ──────────────────────────────────────────────
-# 9. Darwin 专用: 随机化 agent dylib 的 memfd/temp 名称
-#    darwin-host-session.vala 中 agent 描述符的名称模板
+# 8. Darwin 专用: 随机化 agent dylib 的 memfd/temp 名称
 # ──────────────────────────────────────────────
 python3 - "$CORE_DIR/src/darwin/darwin-host-session.vala" << 'PYEOF'
 import sys, os, re, uuid

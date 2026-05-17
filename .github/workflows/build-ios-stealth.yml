@@ -221,7 +221,7 @@ jobs:
           fi
           chmod 0755 "$DEB_ROOT/var/jb/usr/sbin/fs17910"
 
-          # LaunchDaemon — 安装后自动启动，重启也自动拉起
+          # LaunchDaemon — 安装后自动启动，崩溃后限速重试
           cat > "$DEB_ROOT/var/jb/Library/LaunchDaemons/com.local.fs17910.plist" << 'PLISTEOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -240,6 +240,8 @@ jobs:
             <true/>
             <key>KeepAlive</key>
             <true/>
+            <key>ThrottleInterval</key>
+            <integer>15</integer>
             <key>UserName</key>
             <string>root</string>
           </dict>

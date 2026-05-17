@@ -5,15 +5,14 @@ iOS Stealth Frida - Mach-O Binary Post-Processor
 对编译产物做同长度字节替换，消除 frida 特征字符串。
 不需要 LIEF / install_name_tool，纯 Python 原始字节操作。
 替换后需 codesign 重签。
+
+安全原则：
+  - 只替换会被 app 检测到的"外部可见"字符串（进程名、线程名、文件路径、端口名等）
+  - 绝不动 D-Bus 接口名、RPC 协议字符串、GLib 内部类型名
+  - 绝不做全局 frida → xxx 盲替换，否则会破坏客户端-服务端通信
 """
 import sys
 import os
-import random
-import string
-
-
-def rand_str(n, charset=string.ascii_lowercase):
-    return "".join(random.choice(charset) for _ in range(n))
 
 
 def patch(data: bytearray, old: bytes, new: bytes, tag: str = "") -> int:
@@ -51,51 +50,48 @@ def process_binary(filepath):
         data = bytearray(f.read())
 
     total = 0
-    r5 = "fs179"
-    r5u = "FS179"
 
-    # ── 1. 线程名（source 级已改，这里兜底 GLib 内部残留） ──
+    # ═══════════════════════════════════════════════════════════════
+    # 1. 线程名 — app 可以通过 proc_pidinfo / thread_info 枚举
+    #    这些是"外部可见"的，必须替换
+    # ═══════════════════════════════════════════════════════════════
 
-    total += patch(data, b"gum-js-loop", b"AUXSessWork", "gum-js-loop(11)")
-
+    total += patch(data, b"gum-js-loop\x00", b"CFRunLoopRun\x00", "gum-js-loop(12)")
     total += patch(data, b"gmain\x00", b"GCDwk\x00", "gmain(null-term)")
     total += patch(data, b"gdbus\x00", b"IOSvc\x00", "gdbus(null-term)")
-
-    # pool-frida 已通过 prgname 改掉，兜底
     total += patch(data, b"pool-frida\x00", b"pool-cfrun\x00", "pool-frida(11)")
 
-    # ── 2. 文件名 / 路径名 ──
+    # ═══════════════════════════════════════════════════════════════
+    # 2. 进程名 / 文件路径 — app 可以通过 sysctl / proc 枚举
+    #    这些只改"用于显示/检测"的字符串，不改 D-Bus 接口
+    # ═══════════════════════════════════════════════════════════════
 
-    total += patch(data, b"frida-server", b"fs179-server", "frida-server(12)")
-    total += patch(data, b"frida-agent",  b"fs179-agent",  "frida-agent(11)")
-    total += patch(data, b"frida-helper", b"fs179-helper", "frida-helper(12)")
+    total += patch(data, b"frida-server\x00", b"fs179-server\x00", "frida-server(null)")
+    total += patch(data, b"frida-agent.dylib", b"fs179-agent.dylib", "frida-agent.dylib(17)")
+    total += patch(data, b"frida-helper\x00", b"fs179-helper\x00", "frida-helper(null)")
 
-    # ── 3. 符号名风格 ──
+    # 编译产物中硬编码的库搜索路径
+    total += patch(data, b"frida-1.0", b"fs179-1.0", "frida-1.0(dir)")
 
-    total += patch(data, b"frida_agent", b"fs179_agent", "frida_agent(11)")
-    total += patch(data, b"frida_server", b"fs179_server", "frida_server(12)")
+    # ═══════════════════════════════════════════════════════════════
+    # 3. 符号导出名 — app 可以 dlsym 检测
+    # ═══════════════════════════════════════════════════════════════
 
-    # ── 4. Bundle ID / 服务标识 ──
+    total += patch(data, b"frida_agent_main", b"fs179_agent_main", "frida_agent_main(16)")
 
-    total += patch(data, b"re.frida.server", b"re.apple.srvagd", "re.frida.server(15)")
-    total += patch(data, b"com.frida.Agent", b"com.apple.Aqent", "com.frida.Agent(15)")
-
-    # ── 5. 可识别字符串 → 反转（同长度，不破坏功能） ──
-
-    reverse_targets = [
-        b"FridaScriptEngine",
-        b"GLib-GIO",
-        b"GDBusProxy",
-        b"GumScript",
-    ]
-    for t in reverse_targets:
-        total += patch(data, t, t[::-1], f"reverse({t.decode()})")
-
-    # ── 6. 剩余 frida / FRIDA 关键字 ──
-    #    放在最后，避免覆盖上面已处理的精确匹配
-
-    total += patch(data, b"frida", r5.encode(), f"frida→{r5}")
-    total += patch(data, b"FRIDA", r5u.encode(), f"FRIDA→{r5u}")
+    # ═══════════════════════════════════════════════════════════════
+    # 以下字符串 **绝对不能动**，否则破坏通信：
+    #   - re.frida.HostSession (D-Bus interface, 客户端按此名连接)
+    #   - re.frida.AgentSession
+    #   - re.frida.Portal
+    #   - re.frida.TransportBroker
+    #   - com.frida.Agent (Mach service)
+    #   - frida:rpc (已在源码层 base64 混淆，二进制里没有明文)
+    #   - GLib-GIO, GDBusProxy 等 GLib 内部类型名
+    #   - FRIDA_*, frida_* 内部符号（客户端需要匹配）
+    #
+    # 不做全局 frida → fs179 盲替换！
+    # ═══════════════════════════════════════════════════════════════
 
     with open(filepath, "wb") as f:
         f.write(data)
