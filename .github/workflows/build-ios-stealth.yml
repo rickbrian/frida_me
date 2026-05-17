@@ -239,7 +239,9 @@ jobs:
             <key>RunAtLoad</key>
             <true/>
             <key>KeepAlive</key>
-            <false/>
+            <true/>
+            <key>ThrottleInterval</key>
+            <integer>30</integer>
             <key>UserName</key>
             <string>root</string>
           </dict>
