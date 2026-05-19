@@ -114,6 +114,7 @@ jobs:
             --prefix=/var/jb/usr \
             --host=ios-arm64e \
             --enable-server \
+            --enable-gadget \
             -- \
             -Dfrida-core:assets=installed \
             -Dfrida-core:compiler_backend=disabled
@@ -145,6 +146,16 @@ jobs:
           if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
             python3 scripts/anti-anti-frida-macho.py \
               frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper
+          fi
+
+          # Gadget — same stealth patches
+          GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
+          if [ -n "$GADGET" ]; then
+            echo "Patching gadget: $GADGET"
+            python3 scripts/anti-anti-frida-macho.py "$GADGET"
+          else
+            echo "::warning::Gadget dylib not found in dist/"
+            find frida-build -name '*gadget*' -name '*.dylib' 2>/dev/null
           fi
 
       # ── Re-sign ──
@@ -181,6 +192,12 @@ jobs:
           codesign -f -s "-" \
             frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib
 
+          # Sign gadget
+          GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
+          if [ -n "$GADGET" ]; then
+            codesign -f -s "-" "$GADGET"
+          fi
+
           if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
             codesign -f -s "-" --entitlements ent.plist \
               frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper
@@ -204,6 +221,13 @@ jobs:
           cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib release/fs17910d.dylib
           if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
             cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper release/fs17910h
+          fi
+
+          # Gadget — 找到编译产物并打包
+          GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
+          if [ -n "$GADGET" ]; then
+            cp "$GADGET" release/fs17910-gadget.dylib
+            echo "Gadget packaged: $GADGET -> release/fs17910-gadget.dylib"
           fi
 
           # 打 .deb 包（rootless: 全部装到 /var/jb/ 下，路径无 frida）
@@ -302,6 +326,7 @@ jobs:
             release/fs17910
             release/fs17910d.dylib
             release/fs17910h
+            release/fs17910-gadget.dylib
             release/*.deb
           body: |
             ## iOS Stealth Frida Server
