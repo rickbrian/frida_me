@@ -102,7 +102,7 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: bash scripts/apply-ios-stealth.sh frida-build
 
-      # ── Configure + Build (arm64e: server + gadget + devkit, LTO enabled) ──
+      # ── Configure + Build (arm64e: server + gadget + devkit) ──
       - name: Configure (arm64e)
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
@@ -115,10 +115,10 @@ jobs:
             --host=ios-arm64e \
             --enable-server \
             --enable-gadget \
-            --with-devkits=gum,gumjs \
             -- \
             -Dfrida-core:assets=installed \
             -Dfrida-core:compiler_backend=disabled \
+            -Dfrida-gum:devkits=gum,gumjs \
             -Db_lto=true \
             -Doptimization=s \
             -Dstrip=true
@@ -139,52 +139,32 @@ jobs:
           MACOS_CERTID: "-"
         run: DESTDIR="$PWD/dist" make install
 
-      # ── Extract arm64e devkit ──
+      # ── Extract arm64e devkit from build tree ──
       - name: Extract arm64e devkit
         if: steps.check.outputs.skip != 'true'
         run: |
-          mkdir -p devkit-arm64e/gumjs devkit-arm64e/gum
+          echo "=== Searching for devkit files in build tree ==="
+          find frida-build/build -name 'frida-gumjs.*' -o -name 'frida-gum.*' \
+            -o -name '*-example.c' 2>/dev/null | head -30
 
-          # frida-gumjs devkit
-          GUMJS_H=$(find frida-build/build -name 'frida-gumjs.h' -path '*/devkit/*' 2>/dev/null | head -1)
-          GUMJS_A=$(find frida-build/build -name 'frida-gumjs.a' -path '*/devkit/*' 2>/dev/null | head -1)
-          GUMJS_EX=$(find frida-build/build -name 'frida-gumjs-example.c' -path '*/devkit/*' 2>/dev/null | head -1)
+          for KIT in gumjs gum; do
+            DIR="devkit-arm64e/${KIT}"
+            mkdir -p "$DIR"
+            H=$(find frida-build/build -name "frida-${KIT}.h" 2>/dev/null | head -1)
+            A=$(find frida-build/build -name "frida-${KIT}.a" -path '*devkit*' 2>/dev/null | head -1)
+            [ -z "$A" ] && A=$(find frida-build/build -name "frida-${KIT}.a" 2>/dev/null | head -1)
+            EX=$(find frida-build/build -name "frida-${KIT}-example.c" 2>/dev/null | head -1)
+            if [ -n "$H" ] && [ -n "$A" ]; then
+              cp "$H" "$DIR/"
+              cp "$A" "$DIR/"
+              [ -n "$EX" ] && cp "$EX" "$DIR/"
+              echo "[+] arm64e ${KIT}: $(du -h "$DIR/frida-${KIT}.a" | cut -f1)"
+            else
+              echo "::warning::arm64e ${KIT} devkit not found (H=$H A=$A)"
+            fi
+          done
 
-          if [ -z "$GUMJS_H" ] || [ -z "$GUMJS_A" ]; then
-            echo "::warning::arm64e gumjs devkit not found in build/*/devkit/"
-            echo "Searching everywhere in build/..."
-            GUMJS_H=$(find frida-build/build -name 'frida-gumjs.h' 2>/dev/null | head -1)
-            GUMJS_A=$(find frida-build/build -name 'frida-gumjs.a' 2>/dev/null | head -1)
-            GUMJS_EX=$(find frida-build/build -name 'frida-gumjs-example.c' 2>/dev/null | head -1)
-          fi
-
-          if [ -n "$GUMJS_H" ] && [ -n "$GUMJS_A" ]; then
-            cp "$GUMJS_H" devkit-arm64e/gumjs/
-            cp "$GUMJS_A" devkit-arm64e/gumjs/
-            [ -n "$GUMJS_EX" ] && cp "$GUMJS_EX" devkit-arm64e/gumjs/
-            echo "[+] arm64e gumjs devkit: $(du -h devkit-arm64e/gumjs/frida-gumjs.a | cut -f1)"
-          else
-            echo "::error::arm64e gumjs devkit files not found"
-            find frida-build/build -name 'frida-gumjs*' 2>/dev/null || true
-          fi
-
-          # frida-gum devkit (C-only, no JS)
-          GUM_H=$(find frida-build/build -name 'frida-gum.h' -path '*/devkit/*' 2>/dev/null | head -1)
-          GUM_A=$(find frida-build/build -name 'frida-gum.a' -path '*/devkit/*' 2>/dev/null | head -1)
-          GUM_EX=$(find frida-build/build -name 'frida-gum-example.c' -path '*/devkit/*' 2>/dev/null | head -1)
-          if [ -z "$GUM_H" ]; then
-            GUM_H=$(find frida-build/build -name 'frida-gum.h' 2>/dev/null | head -1)
-            GUM_A=$(find frida-build/build -name 'frida-gum.a' 2>/dev/null | head -1)
-            GUM_EX=$(find frida-build/build -name 'frida-gum-example.c' 2>/dev/null | head -1)
-          fi
-          if [ -n "$GUM_H" ] && [ -n "$GUM_A" ]; then
-            cp "$GUM_H" devkit-arm64e/gum/
-            cp "$GUM_A" devkit-arm64e/gum/
-            [ -n "$GUM_EX" ] && cp "$GUM_EX" devkit-arm64e/gum/
-            echo "[+] arm64e gum devkit: $(du -h devkit-arm64e/gum/frida-gum.a | cut -f1)"
-          fi
-
-      # ── Build arm64 devkit (separate pass, no LTO for max compatibility) ──
+      # ── Build arm64 devkit (separate pass, no LTO for compatibility) ──
       - name: Configure (arm64 devkit)
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
@@ -195,10 +175,10 @@ jobs:
           rm -rf build
           ./configure \
             --host=ios-arm64 \
-            --with-devkits=gum,gumjs \
             -- \
             -Dfrida-core:assets=installed \
             -Dfrida-core:compiler_backend=disabled \
+            -Dfrida-gum:devkits=gum,gumjs \
             -Doptimization=s
 
       - name: Build (arm64 devkit)
@@ -212,30 +192,22 @@ jobs:
       - name: Extract arm64 devkit
         if: steps.check.outputs.skip != 'true'
         run: |
-          mkdir -p devkit-arm64/gumjs devkit-arm64/gum
-
-          GUMJS_H=$(find frida-build/build -name 'frida-gumjs.h' 2>/dev/null | head -1)
-          GUMJS_A=$(find frida-build/build -name 'frida-gumjs.a' 2>/dev/null | head -1)
-          GUMJS_EX=$(find frida-build/build -name 'frida-gumjs-example.c' 2>/dev/null | head -1)
-          if [ -n "$GUMJS_H" ] && [ -n "$GUMJS_A" ]; then
-            cp "$GUMJS_H" devkit-arm64/gumjs/
-            cp "$GUMJS_A" devkit-arm64/gumjs/
-            [ -n "$GUMJS_EX" ] && cp "$GUMJS_EX" devkit-arm64/gumjs/
-            echo "[+] arm64 gumjs devkit: $(du -h devkit-arm64/gumjs/frida-gumjs.a | cut -f1)"
-          else
-            echo "::error::arm64 gumjs devkit files not found"
-            find frida-build/build -name 'frida-gumjs*' 2>/dev/null || true
-          fi
-
-          GUM_H=$(find frida-build/build -name 'frida-gum.h' 2>/dev/null | head -1)
-          GUM_A=$(find frida-build/build -name 'frida-gum.a' 2>/dev/null | head -1)
-          GUM_EX=$(find frida-build/build -name 'frida-gum-example.c' 2>/dev/null | head -1)
-          if [ -n "$GUM_H" ] && [ -n "$GUM_A" ]; then
-            cp "$GUM_H" devkit-arm64/gum/
-            cp "$GUM_A" devkit-arm64/gum/
-            [ -n "$GUM_EX" ] && cp "$GUM_EX" devkit-arm64/gum/
-            echo "[+] arm64 gum devkit: $(du -h devkit-arm64/gum/frida-gum.a | cut -f1)"
-          fi
+          for KIT in gumjs gum; do
+            DIR="devkit-arm64/${KIT}"
+            mkdir -p "$DIR"
+            H=$(find frida-build/build -name "frida-${KIT}.h" 2>/dev/null | head -1)
+            A=$(find frida-build/build -name "frida-${KIT}.a" -path '*devkit*' 2>/dev/null | head -1)
+            [ -z "$A" ] && A=$(find frida-build/build -name "frida-${KIT}.a" 2>/dev/null | head -1)
+            EX=$(find frida-build/build -name "frida-${KIT}-example.c" 2>/dev/null | head -1)
+            if [ -n "$H" ] && [ -n "$A" ]; then
+              cp "$H" "$DIR/"
+              cp "$A" "$DIR/"
+              [ -n "$EX" ] && cp "$EX" "$DIR/"
+              echo "[+] arm64 ${KIT}: $(du -h "$DIR/frida-${KIT}.a" | cut -f1)"
+            else
+              echo "::warning::arm64 ${KIT} devkit not found (H=$H A=$A)"
+            fi
+          done
 
       # ── Post-build binary patching ──
       - name: Patch binaries
@@ -298,7 +270,7 @@ jobs:
                 BEFORE=$(du -h "$LIB" | cut -f1)
                 strip -S "$LIB" 2>/dev/null || true
                 AFTER=$(du -h "$LIB" | cut -f1)
-                echo "strip -S ${arch}/${kit}: ${BEFORE} → ${AFTER}"
+                echo "strip -S ${arch}/${kit}: ${BEFORE} -> ${AFTER}"
               fi
             done
           done
