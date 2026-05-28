@@ -102,8 +102,8 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: bash scripts/apply-ios-stealth.sh frida-build
 
-      # ── Configure + Build ──
-      - name: Configure
+      # ── Configure + Build (arm64e: server + gadget + devkit, LTO enabled) ──
+      - name: Configure (arm64e)
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
         env:
@@ -115,11 +115,15 @@ jobs:
             --host=ios-arm64e \
             --enable-server \
             --enable-gadget \
+            --with-devkits=gum,gumjs \
             -- \
             -Dfrida-core:assets=installed \
-            -Dfrida-core:compiler_backend=disabled
+            -Dfrida-core:compiler_backend=disabled \
+            -Db_lto=true \
+            -Doptimization=s \
+            -Dstrip=true
 
-      - name: Build
+      - name: Build (arm64e)
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
         env:
@@ -135,10 +139,109 @@ jobs:
           MACOS_CERTID: "-"
         run: DESTDIR="$PWD/dist" make install
 
+      # ── Extract arm64e devkit ──
+      - name: Extract arm64e devkit
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          mkdir -p devkit-arm64e/gumjs devkit-arm64e/gum
+
+          # frida-gumjs devkit
+          GUMJS_H=$(find frida-build/build -name 'frida-gumjs.h' -path '*/devkit/*' 2>/dev/null | head -1)
+          GUMJS_A=$(find frida-build/build -name 'frida-gumjs.a' -path '*/devkit/*' 2>/dev/null | head -1)
+          GUMJS_EX=$(find frida-build/build -name 'frida-gumjs-example.c' -path '*/devkit/*' 2>/dev/null | head -1)
+
+          if [ -z "$GUMJS_H" ] || [ -z "$GUMJS_A" ]; then
+            echo "::warning::arm64e gumjs devkit not found in build/*/devkit/"
+            echo "Searching everywhere in build/..."
+            GUMJS_H=$(find frida-build/build -name 'frida-gumjs.h' 2>/dev/null | head -1)
+            GUMJS_A=$(find frida-build/build -name 'frida-gumjs.a' 2>/dev/null | head -1)
+            GUMJS_EX=$(find frida-build/build -name 'frida-gumjs-example.c' 2>/dev/null | head -1)
+          fi
+
+          if [ -n "$GUMJS_H" ] && [ -n "$GUMJS_A" ]; then
+            cp "$GUMJS_H" devkit-arm64e/gumjs/
+            cp "$GUMJS_A" devkit-arm64e/gumjs/
+            [ -n "$GUMJS_EX" ] && cp "$GUMJS_EX" devkit-arm64e/gumjs/
+            echo "[+] arm64e gumjs devkit: $(du -h devkit-arm64e/gumjs/frida-gumjs.a | cut -f1)"
+          else
+            echo "::error::arm64e gumjs devkit files not found"
+            find frida-build/build -name 'frida-gumjs*' 2>/dev/null || true
+          fi
+
+          # frida-gum devkit (C-only, no JS)
+          GUM_H=$(find frida-build/build -name 'frida-gum.h' -path '*/devkit/*' 2>/dev/null | head -1)
+          GUM_A=$(find frida-build/build -name 'frida-gum.a' -path '*/devkit/*' 2>/dev/null | head -1)
+          GUM_EX=$(find frida-build/build -name 'frida-gum-example.c' -path '*/devkit/*' 2>/dev/null | head -1)
+          if [ -z "$GUM_H" ]; then
+            GUM_H=$(find frida-build/build -name 'frida-gum.h' 2>/dev/null | head -1)
+            GUM_A=$(find frida-build/build -name 'frida-gum.a' 2>/dev/null | head -1)
+            GUM_EX=$(find frida-build/build -name 'frida-gum-example.c' 2>/dev/null | head -1)
+          fi
+          if [ -n "$GUM_H" ] && [ -n "$GUM_A" ]; then
+            cp "$GUM_H" devkit-arm64e/gum/
+            cp "$GUM_A" devkit-arm64e/gum/
+            [ -n "$GUM_EX" ] && cp "$GUM_EX" devkit-arm64e/gum/
+            echo "[+] arm64e gum devkit: $(du -h devkit-arm64e/gum/frida-gum.a | cut -f1)"
+          fi
+
+      # ── Build arm64 devkit (separate pass, no LTO for max compatibility) ──
+      - name: Configure (arm64 devkit)
+        if: steps.check.outputs.skip != 'true'
+        working-directory: frida-build
+        env:
+          IOS_CERTID: "-"
+          MACOS_CERTID: "-"
+        run: |
+          rm -rf build
+          ./configure \
+            --host=ios-arm64 \
+            --with-devkits=gum,gumjs \
+            -- \
+            -Dfrida-core:assets=installed \
+            -Dfrida-core:compiler_backend=disabled \
+            -Doptimization=s
+
+      - name: Build (arm64 devkit)
+        if: steps.check.outputs.skip != 'true'
+        working-directory: frida-build
+        env:
+          IOS_CERTID: "-"
+          MACOS_CERTID: "-"
+        run: make -j$(sysctl -n hw.ncpu)
+
+      - name: Extract arm64 devkit
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          mkdir -p devkit-arm64/gumjs devkit-arm64/gum
+
+          GUMJS_H=$(find frida-build/build -name 'frida-gumjs.h' 2>/dev/null | head -1)
+          GUMJS_A=$(find frida-build/build -name 'frida-gumjs.a' 2>/dev/null | head -1)
+          GUMJS_EX=$(find frida-build/build -name 'frida-gumjs-example.c' 2>/dev/null | head -1)
+          if [ -n "$GUMJS_H" ] && [ -n "$GUMJS_A" ]; then
+            cp "$GUMJS_H" devkit-arm64/gumjs/
+            cp "$GUMJS_A" devkit-arm64/gumjs/
+            [ -n "$GUMJS_EX" ] && cp "$GUMJS_EX" devkit-arm64/gumjs/
+            echo "[+] arm64 gumjs devkit: $(du -h devkit-arm64/gumjs/frida-gumjs.a | cut -f1)"
+          else
+            echo "::error::arm64 gumjs devkit files not found"
+            find frida-build/build -name 'frida-gumjs*' 2>/dev/null || true
+          fi
+
+          GUM_H=$(find frida-build/build -name 'frida-gum.h' 2>/dev/null | head -1)
+          GUM_A=$(find frida-build/build -name 'frida-gum.a' 2>/dev/null | head -1)
+          GUM_EX=$(find frida-build/build -name 'frida-gum-example.c' 2>/dev/null | head -1)
+          if [ -n "$GUM_H" ] && [ -n "$GUM_A" ]; then
+            cp "$GUM_H" devkit-arm64/gum/
+            cp "$GUM_A" devkit-arm64/gum/
+            [ -n "$GUM_EX" ] && cp "$GUM_EX" devkit-arm64/gum/
+            echo "[+] arm64 gum devkit: $(du -h devkit-arm64/gum/frida-gum.a | cut -f1)"
+          fi
+
       # ── Post-build binary patching ──
       - name: Patch binaries
         if: steps.check.outputs.skip != 'true'
         run: |
+          # Server / Agent / Helper
           python3 scripts/anti-anti-frida-macho.py \
             frida-build/dist/var/jb/usr/bin/frida-server \
             frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib
@@ -148,7 +251,7 @@ jobs:
               frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper
           fi
 
-          # Gadget — same stealth patches
+          # Gadget
           GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
           if [ -n "$GADGET" ]; then
             echo "Patching gadget: $GADGET"
@@ -157,6 +260,48 @@ jobs:
             echo "::warning::Gadget dylib not found in dist/"
             find frida-build -name '*gadget*' -name '*.dylib' 2>/dev/null
           fi
+
+          # Devkit .a 静态库 — 等长替换对 ar 归档格式安全
+          echo ""
+          echo "=== Patching devkit static libraries ==="
+          for arch in arm64e arm64; do
+            for kit in gumjs gum; do
+              LIB="devkit-${arch}/${kit}/frida-${kit}.a"
+              if [ -f "$LIB" ]; then
+                python3 scripts/anti-anti-frida-macho.py "$LIB"
+              fi
+            done
+          done
+
+      # ── Strip symbols ──
+      - name: Strip binaries
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          # server / helper: full strip (standalone executables)
+          strip frida-build/dist/var/jb/usr/bin/frida-server 2>/dev/null || true
+          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
+            strip frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper 2>/dev/null || true
+          fi
+
+          # agent / gadget: strip -x (keep global symbols for dlsym)
+          strip -x frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib 2>/dev/null || true
+          GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
+          if [ -n "$GADGET" ]; then
+            strip -x "$GADGET" 2>/dev/null || true
+          fi
+
+          # devkit .a: strip -S (remove debug info, keep all linking symbols)
+          for arch in arm64e arm64; do
+            for kit in gumjs gum; do
+              LIB="devkit-${arch}/${kit}/frida-${kit}.a"
+              if [ -f "$LIB" ]; then
+                BEFORE=$(du -h "$LIB" | cut -f1)
+                strip -S "$LIB" 2>/dev/null || true
+                AFTER=$(du -h "$LIB" | cut -f1)
+                echo "strip -S ${arch}/${kit}: ${BEFORE} → ${AFTER}"
+              fi
+            done
+          done
 
       # ── Re-sign ──
       - name: Create entitlements and re-sign
@@ -307,6 +452,18 @@ jobs:
 
           dpkg-deb -b -Zxz "$DEB_ROOT" "release/fs17910_${FRIDA_VERSION}_iphoneos-arm64.deb"
 
+          # ── Devkit tar.xz 打包 ──
+          for arch in arm64e arm64; do
+            for kit in gumjs gum; do
+              DIR="devkit-${arch}/${kit}"
+              if [ -f "${DIR}/frida-${kit}.a" ]; then
+                TARNAME="stealth-frida-${kit}-devkit-${FRIDA_VERSION}-ios-${arch}.tar.xz"
+                tar -cJf "release/${TARNAME}" -C "${DIR}" .
+                echo "Packed: ${TARNAME} ($(du -h "release/${TARNAME}" | cut -f1))"
+              fi
+            done
+          done
+
       # ── Upload + Release ──
       - name: Upload build artifact
         if: steps.check.outputs.skip != 'true'
@@ -328,53 +485,76 @@ jobs:
             release/fs17910h
             release/fs17910-gadget.dylib
             release/*.deb
+            release/stealth-frida-gumjs-devkit-*.tar.xz
+            release/stealth-frida-gum-devkit-*.tar.xz
           body: |
-            ## iOS Stealth Frida Server
+            ## iOS Stealth Frida ${{ steps.frida.outputs.version }}
 
-            基于 Frida **${{ steps.frida.outputs.version }}**
+            源码级隐匿 + 二进制 patch，线程名/segment名/字符串特征全部处理。
 
-            ### 文件说明
+            ### 产物说明
+
+            #### 一、Server（传统 frida-server 模式）
             | 文件 | 说明 |
             |---|---|
-            | `fs17910` | server 主程序 |
-            | `fs17910d.dylib` | agent 动态库 |
+            | `fs17910` | stealth server 主程序 (arm64e) |
+            | `fs17910d.dylib` | stealth agent 动态库 |
             | `fs17910h` | helper |
-            | `fs17910_*_iphoneos-arm64.deb` | 一键安装包 |
+            | `fs17910-gadget.dylib` | stealth Gadget（嵌入 IPA 用） |
+            | `fs17910_*_iphoneos-arm64.deb` | 一键安装包（自动启动） |
 
-            ### 方式一：deb 安装（推荐，装完自动启动）
+            #### 二、GumJS Devkit（自编译 dylib，无 frida-server 特征）
+            | 文件 | 说明 |
+            |---|---|
+            | `stealth-frida-gumjs-devkit-*-ios-arm64e.tar.xz` | A12+ 真机 (iPhone XS 及以后) |
+            | `stealth-frida-gumjs-devkit-*-ios-arm64.tar.xz` | A8–A11 真机 (iPhone 6s ~ X) |
+            | `stealth-frida-gum-devkit-*-ios-arm64e.tar.xz` | C-only API (arm64e) |
+            | `stealth-frida-gum-devkit-*-ios-arm64.tar.xz` | C-only API (arm64) |
+
+            每个 devkit 包含：
+            - `frida-gumjs.h` / `frida-gum.h` — 头文件
+            - `frida-gumjs.a` / `frida-gum.a` — 静态库（已去除 frida 特征字符串）
+            - `frida-gumjs-example.c` / `frida-gum-example.c` — 示例代码
+
+            ---
+
+            ### 用法一：deb 安装 stealth server（推荐入门）
             ```bash
-            # palera1n rootless 越狱
             scp fs17910_*_iphoneos-arm64.deb root@DEVICE:/var/tmp/
             ssh root@DEVICE "dpkg -i /var/tmp/fs17910_*.deb"
-            # 装完即自动运行，重启设备也会自动拉起，无需手动操作
+            # 装完自动运行，重启设备也会自动拉起
             ```
 
-            卸载：
+            卸载：`ssh root@DEVICE "dpkg -r com.local.fs17910"`
+
+            ### 用法二：GumJS Devkit 自编译 Tweak（终极隐匿）
+
+            适用于 inline SVC 检测等 stealth server 也过不了的场景。
+            无 frida-server 进程、无特征线程、无特征端口。
+
             ```bash
-            ssh root@DEVICE "dpkg -r com.local.fs17910"
+            # 1. 解压 devkit
+            tar xf stealth-frida-gumjs-devkit-*-ios-arm64e.tar.xz -C devkit/
+
+            # 2. 编译自定义 dylib
+            clang -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
+                  -target arm64e-apple-ios15.0 -shared \
+                  -o MyBypass.dylib bypass.c \
+                  -Ldevkit -lfrida-gumjs \
+                  -framework Foundation -lresolv -lpthread
+            strip -x MyBypass.dylib
+
+            # 3. 打包为 Substrate/ElleKit tweak 安装到设备
+            #    Filter plist 指定目标 bundle id
             ```
 
-            ### 方式二：手动部署
+            ### 电脑端连接（server 模式）
             ```bash
-            scp fs17910 fs17910d.dylib fs17910h root@DEVICE:/var/tmp/
-            ssh root@DEVICE
-            mkdir -p /var/jb/usr/lib/fs179-1.0
-            mv /var/tmp/fs17910d.dylib /var/jb/usr/lib/fs179-1.0/fs179-agent.dylib
-            mv /var/tmp/fs17910h /var/jb/usr/lib/fs179-1.0/fs179-helper
-            chmod +x /var/tmp/fs17910 /var/jb/usr/lib/fs179-1.0/fs179-helper
-            /var/tmp/fs17910 &
-            ```
-
-            ### 电脑端连接
-            ```bash
-            # USB 模式（默认，推荐）
             frida -U -f com.target.app -l script.js
-
-            # Wi-Fi 模式（需要设备端加 --listen 参数启动）
             frida -H DEVICE_IP:8899 -f com.target.app -l script.js
             ```
 
-            > 💡 `frida -U` / `frida -H` 在电脑上运行，不会被设备上的 app 检测到
-            > 💡 此 deb 适配 **palera1n rootless** 越狱，文件安装到 `/var/jb/` 下
+            > 💡 GumJS devkit 的 .a 已经过 stealth patch，
+            > 静态链接进你的 dylib 后不含 "frida"/"gum-js-loop" 等特征字符串
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
