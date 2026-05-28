@@ -143,24 +143,34 @@ jobs:
       - name: Extract arm64e devkit
         if: steps.check.outputs.skip != 'true'
         run: |
-          echo "=== Searching for devkit files in build tree ==="
-          find frida-build/build -name 'frida-gumjs.*' -o -name 'frida-gum.*' \
-            -o -name '*-example.c' 2>/dev/null | head -30
+          echo "=== Everything inside devkit directories ==="
+          find frida-build/build -path '*devkit*' -type f 2>/dev/null
+
+          echo ""
+          echo "=== All .a files in build tree (first 30) ==="
+          find frida-build/build -name '*.a' 2>/dev/null | head -30
 
           for KIT in gumjs gum; do
             DIR="devkit-arm64e/${KIT}"
             mkdir -p "$DIR"
-            H=$(find frida-build/build -name "frida-${KIT}.h" 2>/dev/null | head -1)
-            A=$(find frida-build/build -name "frida-${KIT}.a" -path '*devkit*' 2>/dev/null | head -1)
-            [ -z "$A" ] && A=$(find frida-build/build -name "frida-${KIT}.a" 2>/dev/null | head -1)
-            EX=$(find frida-build/build -name "frida-${KIT}-example.c" 2>/dev/null | head -1)
-            if [ -n "$H" ] && [ -n "$A" ]; then
-              cp "$H" "$DIR/"
-              cp "$A" "$DIR/"
-              [ -n "$EX" ] && cp "$EX" "$DIR/"
+
+            # 在 devkit 目录里找，匹配 frida-xxx.a 或 libfrida-xxx.a
+            DEVKIT_DIR=$(find frida-build/build -type d -path "*/${KIT}/devkit" 2>/dev/null | head -1)
+            if [ -n "$DEVKIT_DIR" ]; then
+              echo "${KIT} devkit dir: ${DEVKIT_DIR}"
+              ls -la "$DEVKIT_DIR"/
+              # 复制整个 devkit 目录内容
+              cp "$DEVKIT_DIR"/* "$DIR/" 2>/dev/null || true
+              # 如果 .a 叫 libfrida-xxx.a，重命名为 frida-xxx.a
+              if [ -f "$DIR/libfrida-${KIT}.a" ] && [ ! -f "$DIR/frida-${KIT}.a" ]; then
+                mv "$DIR/libfrida-${KIT}.a" "$DIR/frida-${KIT}.a"
+              fi
+            fi
+
+            if [ -f "$DIR/frida-${KIT}.a" ]; then
               echo "[+] arm64e ${KIT}: $(du -h "$DIR/frida-${KIT}.a" | cut -f1)"
             else
-              echo "::warning::arm64e ${KIT} devkit not found (H=$H A=$A)"
+              echo "::warning::arm64e ${KIT} .a not found in devkit dir"
             fi
           done
 
@@ -192,20 +202,27 @@ jobs:
       - name: Extract arm64 devkit
         if: steps.check.outputs.skip != 'true'
         run: |
+          echo "=== arm64 devkit directories ==="
+          find frida-build/build -path '*devkit*' -type f 2>/dev/null
+
           for KIT in gumjs gum; do
             DIR="devkit-arm64/${KIT}"
             mkdir -p "$DIR"
-            H=$(find frida-build/build -name "frida-${KIT}.h" 2>/dev/null | head -1)
-            A=$(find frida-build/build -name "frida-${KIT}.a" -path '*devkit*' 2>/dev/null | head -1)
-            [ -z "$A" ] && A=$(find frida-build/build -name "frida-${KIT}.a" 2>/dev/null | head -1)
-            EX=$(find frida-build/build -name "frida-${KIT}-example.c" 2>/dev/null | head -1)
-            if [ -n "$H" ] && [ -n "$A" ]; then
-              cp "$H" "$DIR/"
-              cp "$A" "$DIR/"
-              [ -n "$EX" ] && cp "$EX" "$DIR/"
+
+            DEVKIT_DIR=$(find frida-build/build -type d -path "*/${KIT}/devkit" 2>/dev/null | head -1)
+            if [ -n "$DEVKIT_DIR" ]; then
+              echo "${KIT} devkit dir: ${DEVKIT_DIR}"
+              ls -la "$DEVKIT_DIR"/
+              cp "$DEVKIT_DIR"/* "$DIR/" 2>/dev/null || true
+              if [ -f "$DIR/libfrida-${KIT}.a" ] && [ ! -f "$DIR/frida-${KIT}.a" ]; then
+                mv "$DIR/libfrida-${KIT}.a" "$DIR/frida-${KIT}.a"
+              fi
+            fi
+
+            if [ -f "$DIR/frida-${KIT}.a" ]; then
               echo "[+] arm64 ${KIT}: $(du -h "$DIR/frida-${KIT}.a" | cut -f1)"
             else
-              echo "::warning::arm64 ${KIT} devkit not found (H=$H A=$A)"
+              echo "::warning::arm64 ${KIT} .a not found in devkit dir"
             fi
           done
 
