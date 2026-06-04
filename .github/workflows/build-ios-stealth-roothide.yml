@@ -1,4 +1,4 @@
-name: Build iOS Stealth Frida
+name: Build iOS Stealth Frida (roothide)
 
 on:
   workflow_dispatch:
@@ -9,10 +9,8 @@ on:
   push:
     branches: ["main"]
     paths:
-      - ".github/workflows/build-ios-stealth.yml"
+      - ".github/workflows/build-ios-stealth-roothide.yml"
       - "scripts/**"
-  schedule:
-    - cron: "0 9/12 * * *"
 
 jobs:
   build:
@@ -46,18 +44,19 @@ jobs:
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "Frida version: $VER"
 
-      # ── Skip if already released (schedule only) ──
+      # ── Skip if already released (push only) ──
       - name: Check existing release
         id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ steps.frida.outputs.version }}-ios-stealth-roothide"
           CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.frida.outputs.version }}-ios-stealth")
-          if [ "$CODE" = "200" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}")
+          if [ "$CODE" = "200" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Release already exists, skipping (schedule trigger)"
+            echo "Release already exists, skipping"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
@@ -68,19 +67,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          TAG="${{ steps.frida.outputs.version }}-ios-stealth-roothide"
           CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.frida.outputs.version }}-ios-stealth")
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}")
           if [ "$CODE" = "200" ]; then
             echo "Deleting old release..."
             RELEASE_ID=$(curl -s \
               -H "Authorization: Bearer $GH_TOKEN" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.frida.outputs.version }}-ios-stealth" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}" \
               | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
             curl -s -X DELETE \
               -H "Authorization: Bearer $GH_TOKEN" \
               "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
-            git push --delete origin "${{ steps.frida.outputs.version }}-ios-stealth" || true
+            git push --delete origin "${TAG}" || true
           fi
 
       # ── Clone Frida ──
@@ -111,7 +111,7 @@ jobs:
           MACOS_CERTID: "-"
         run: |
           ./configure \
-            --prefix=/var/jb/usr \
+            --prefix=/usr \
             --host=ios-arm64e \
             --enable-server \
             --enable-gadget \
@@ -143,25 +143,15 @@ jobs:
       - name: Extract arm64e devkit
         if: steps.check.outputs.skip != 'true'
         run: |
-          echo "=== Everything inside devkit directories ==="
-          find frida-build/build -path '*devkit*' -type f 2>/dev/null
-
-          echo ""
-          echo "=== All .a files in build tree (first 30) ==="
-          find frida-build/build -name '*.a' 2>/dev/null | head -30
-
           for KIT in gumjs gum; do
             DIR="devkit-arm64e/${KIT}"
             mkdir -p "$DIR"
 
-            # 在 devkit 目录里找，匹配 frida-xxx.a 或 libfrida-xxx.a
             DEVKIT_DIR=$(find frida-build/build -type d -path "*/${KIT}/devkit" 2>/dev/null | head -1)
             if [ -n "$DEVKIT_DIR" ]; then
               echo "${KIT} devkit dir: ${DEVKIT_DIR}"
               ls -la "$DEVKIT_DIR"/
-              # 复制整个 devkit 目录内容
               cp "$DEVKIT_DIR"/* "$DIR/" 2>/dev/null || true
-              # 如果 .a 叫 libfrida-xxx.a，重命名为 frida-xxx.a
               if [ -f "$DIR/libfrida-${KIT}.a" ] && [ ! -f "$DIR/frida-${KIT}.a" ]; then
                 mv "$DIR/libfrida-${KIT}.a" "$DIR/frida-${KIT}.a"
               fi
@@ -174,7 +164,7 @@ jobs:
             fi
           done
 
-      # ── Build arm64 devkit (separate pass, no LTO for compatibility) ──
+      # ── Build arm64 devkit (separate pass) ──
       - name: Configure (arm64 devkit)
         if: steps.check.outputs.skip != 'true'
         working-directory: frida-build
@@ -202,9 +192,6 @@ jobs:
       - name: Extract arm64 devkit
         if: steps.check.outputs.skip != 'true'
         run: |
-          echo "=== arm64 devkit directories ==="
-          find frida-build/build -path '*devkit*' -type f 2>/dev/null
-
           for KIT in gumjs gum; do
             DIR="devkit-arm64/${KIT}"
             mkdir -p "$DIR"
@@ -230,27 +217,20 @@ jobs:
       - name: Patch binaries
         if: steps.check.outputs.skip != 'true'
         run: |
-          # Server / Agent / Helper
           python3 scripts/anti-anti-frida-macho.py \
-            frida-build/dist/var/jb/usr/bin/frida-server \
-            frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib
+            frida-build/dist/usr/bin/frida-server \
+            frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib
 
-          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
+          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
             python3 scripts/anti-anti-frida-macho.py \
-              frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper
+              frida-build/dist/usr/lib/frida-1.0/frida-helper
           fi
 
-          # Gadget
           GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
           if [ -n "$GADGET" ]; then
-            echo "Patching gadget: $GADGET"
             python3 scripts/anti-anti-frida-macho.py "$GADGET"
-          else
-            echo "::warning::Gadget dylib not found in dist/"
-            find frida-build -name '*gadget*' -name '*.dylib' 2>/dev/null
           fi
 
-          # Devkit .a 静态库 — 等长替换对 ar 归档格式安全
           echo ""
           echo "=== Patching devkit static libraries ==="
           for arch in arm64e arm64; do
@@ -266,20 +246,17 @@ jobs:
       - name: Strip binaries
         if: steps.check.outputs.skip != 'true'
         run: |
-          # server / helper: full strip (standalone executables)
-          strip frida-build/dist/var/jb/usr/bin/frida-server 2>/dev/null || true
-          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
-            strip frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper 2>/dev/null || true
+          strip frida-build/dist/usr/bin/frida-server 2>/dev/null || true
+          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
+            strip frida-build/dist/usr/lib/frida-1.0/frida-helper 2>/dev/null || true
           fi
 
-          # agent / gadget: strip -x (keep global symbols for dlsym)
-          strip -x frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib 2>/dev/null || true
+          strip -x frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib 2>/dev/null || true
           GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
           if [ -n "$GADGET" ]; then
             strip -x "$GADGET" 2>/dev/null || true
           fi
 
-          # devkit .a: strip -S (remove debug info, keep all linking symbols)
           for arch in arm64e arm64; do
             for kit in gumjs gum; do
               LIB="devkit-${arch}/${kit}/frida-${kit}.a"
@@ -319,22 +296,20 @@ jobs:
           </plist>
           ENTEOF
 
-          # frida-server needs entitlements
           codesign -f -s "-" --entitlements ent.plist \
-            frida-build/dist/var/jb/usr/bin/frida-server
+            frida-build/dist/usr/bin/frida-server
 
           codesign -f -s "-" \
-            frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib
+            frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib
 
-          # Sign gadget
           GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
           if [ -n "$GADGET" ]; then
             codesign -f -s "-" "$GADGET"
           fi
 
-          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
+          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
             codesign -f -s "-" --entitlements ent.plist \
-              frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper
+              frida-build/dist/usr/lib/frida-1.0/frida-helper
           fi
 
       # ── Install dpkg (macOS doesn't have it) ──
@@ -342,45 +317,56 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: brew install dpkg
 
-      # ── Package ──
-      - name: Package release assets
+      # ── Package (roothide native format) ──
+      - name: Package release assets (roothide)
         if: steps.check.outputs.skip != 'true'
         env:
           FRIDA_VERSION: ${{ steps.frida.outputs.version }}
         run: |
           mkdir -p release
 
-          # 单独的二进制文件
-          cp frida-build/dist/var/jb/usr/bin/frida-server release/fs17910
-          cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib release/fs17910d.dylib
-          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
-            cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper release/fs17910h
+          # 单独的二进制文件（与 rootless 版相同产物名）
+          cp frida-build/dist/usr/bin/frida-server release/fs17910
+          cp frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib release/fs17910d.dylib
+          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
+            cp frida-build/dist/usr/lib/frida-1.0/frida-helper release/fs17910h
           fi
 
-          # Gadget — 找到编译产物并打包
           GADGET=$(find frida-build/dist -name 'frida-gadget.dylib' -o -name 'FridaGadget.dylib' 2>/dev/null | head -1)
           if [ -n "$GADGET" ]; then
             cp "$GADGET" release/fs17910-gadget.dylib
-            echo "Gadget packaged: $GADGET -> release/fs17910-gadget.dylib"
           fi
 
-          # 打 .deb 包（rootless: 全部装到 /var/jb/ 下，路径无 frida）
+          # ══════════════════════════════════════════
+          # roothide native .deb
+          # 路径不带 /var/jb/ 前缀，dpkg 安装到 jbroot
+          # ══════════════════════════════════════════
           DEB_ROOT="deb-build"
           mkdir -p "$DEB_ROOT/DEBIAN"
-          mkdir -p "$DEB_ROOT/var/jb/usr/sbin"
-          mkdir -p "$DEB_ROOT/var/jb/usr/lib/fs179-1.0"
-          mkdir -p "$DEB_ROOT/var/jb/Library/LaunchDaemons"
+          mkdir -p "$DEB_ROOT/usr/sbin"
+          mkdir -p "$DEB_ROOT/usr/lib/fs179-1.0"
 
-          cp frida-build/dist/var/jb/usr/bin/frida-server "$DEB_ROOT/var/jb/usr/sbin/fs17910"
-          cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-agent.dylib "$DEB_ROOT/var/jb/usr/lib/fs179-1.0/fs179-agent.dylib"
-          if [ -f "frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper" ]; then
-            cp frida-build/dist/var/jb/usr/lib/frida-1.0/frida-helper "$DEB_ROOT/var/jb/usr/lib/fs179-1.0/fs179-helper"
-            chmod 0755 "$DEB_ROOT/var/jb/usr/lib/fs179-1.0/fs179-helper"
+          cp frida-build/dist/usr/bin/frida-server "$DEB_ROOT/usr/sbin/fs17910"
+          cp frida-build/dist/usr/lib/frida-1.0/frida-agent.dylib "$DEB_ROOT/usr/lib/fs179-1.0/fs179-agent.dylib"
+          if [ -f "frida-build/dist/usr/lib/frida-1.0/frida-helper" ]; then
+            cp frida-build/dist/usr/lib/frida-1.0/frida-helper "$DEB_ROOT/usr/lib/fs179-1.0/fs179-helper"
+            chmod 0755 "$DEB_ROOT/usr/lib/fs179-1.0/fs179-helper"
           fi
-          chmod 0755 "$DEB_ROOT/var/jb/usr/sbin/fs17910"
+          chmod 0755 "$DEB_ROOT/usr/sbin/fs17910"
 
-          # LaunchDaemon — 安装后自动启动，崩溃后限速重试
-          cat > "$DEB_ROOT/var/jb/Library/LaunchDaemons/com.local.fs17910.plist" << 'PLISTEOF'
+          # postinst — 动态解析 jbroot 路径，生成 LaunchDaemon plist 并加载
+          cat > "$DEB_ROOT/DEBIAN/postinst" << 'POSTEOF'
+          #!/bin/bash
+          # roothide: postinst runs in jbroot context
+          # jbroot CLI converts jbroot-relative path → rootfs-absolute path
+          BIN_ABS="$(jbroot /usr/sbin/fs17910)"
+          PLIST_ABS="$(jbroot /Library/LaunchDaemons/com.local.fs17910.plist)"
+
+          # Create LaunchDaemons dir if needed
+          mkdir -p /Library/LaunchDaemons
+
+          # Generate plist with resolved rootfs-absolute binary path
+          cat > /Library/LaunchDaemons/com.local.fs17910.plist << PLISTEOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
             "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -389,10 +375,10 @@ jobs:
             <key>Label</key>
             <string>com.local.fs17910</string>
             <key>Program</key>
-            <string>/var/jb/usr/sbin/fs17910</string>
+            <string>${BIN_ABS}</string>
             <key>ProgramArguments</key>
             <array>
-              <string>/var/jb/usr/sbin/fs17910</string>
+              <string>${BIN_ABS}</string>
             </array>
             <key>RunAtLoad</key>
             <true/>
@@ -405,15 +391,13 @@ jobs:
           </dict>
           </plist>
           PLISTEOF
-          sed -i '' 's/^          //' "$DEB_ROOT/var/jb/Library/LaunchDaemons/com.local.fs17910.plist"
 
-          # postinst — dpkg 安装后加载 daemon
-          cat > "$DEB_ROOT/DEBIAN/postinst" << 'POSTEOF'
-          #!/bin/bash
-          chown root:wheel /var/jb/Library/LaunchDaemons/com.local.fs17910.plist
-          chmod 644 /var/jb/Library/LaunchDaemons/com.local.fs17910.plist
-          launchctl unload /var/jb/Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
-          launchctl load /var/jb/Library/LaunchDaemons/com.local.fs17910.plist
+          chown root:wheel /Library/LaunchDaemons/com.local.fs17910.plist
+          chmod 644 /Library/LaunchDaemons/com.local.fs17910.plist
+
+          # launchctl is a system tool — call with rootfs-absolute plist path
+          launchctl unload "${PLIST_ABS}" 2>/dev/null || true
+          launchctl load "${PLIST_ABS}"
           POSTEOF
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/postinst"
           chmod 0755 "$DEB_ROOT/DEBIAN/postinst"
@@ -421,8 +405,10 @@ jobs:
           # prerm — 卸载前停止 daemon
           cat > "$DEB_ROOT/DEBIAN/prerm" << 'PRERMEOF'
           #!/bin/bash
-          launchctl unload /var/jb/Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null
-          killall fs17910 2>/dev/null
+          PLIST_ABS="$(jbroot /Library/LaunchDaemons/com.local.fs17910.plist)"
+          launchctl unload "${PLIST_ABS}" 2>/dev/null || true
+          killall fs17910 2>/dev/null || true
+          rm -f /Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null || true
           exit 0
           PRERMEOF
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/prerm"
@@ -436,10 +422,11 @@ jobs:
           Description: system service daemon
           Maintainer: local
           Section: System
+          Tag: roothide::native
           CTRLEOF
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/control"
 
-          dpkg-deb -b -Zxz "$DEB_ROOT" "release/fs17910_${FRIDA_VERSION}_iphoneos-arm64.deb"
+          dpkg-deb -b -Zxz "$DEB_ROOT" "release/fs17910_${FRIDA_VERSION}_iphoneos-arm64_roothide.deb"
 
           # ── Devkit tar.xz 打包 ──
           for arch in arm64e arm64; do
@@ -458,93 +445,78 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: fs17910-ios-stealth
+          name: fs17910-ios-stealth-roothide
           path: release/*
 
       - name: Create GitHub Release
         if: steps.check.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "${{ steps.frida.outputs.version }}-ios-stealth"
-          name: "Stealth Frida ${{ steps.frida.outputs.version }} for iOS"
+          tag_name: "${{ steps.frida.outputs.version }}-ios-stealth-roothide"
+          name: "Stealth Frida ${{ steps.frida.outputs.version }} for iOS (roothide)"
           prerelease: false
           files: |
             release/fs17910
             release/fs17910d.dylib
             release/fs17910h
             release/fs17910-gadget.dylib
-            release/*.deb
+            release/*_roothide.deb
             release/stealth-frida-gumjs-devkit-*.tar.xz
             release/stealth-frida-gum-devkit-*.tar.xz
           body: |
-            ## iOS Stealth Frida ${{ steps.frida.outputs.version }}
+            ## iOS Stealth Frida ${{ steps.frida.outputs.version }} (roothide native)
 
-            源码级隐匿 + 二进制 patch，线程名/segment名/字符串特征全部处理。
+            适用于 **roothide Bootstrap / Palera1n-roothide** 的原生格式包。
+            无需 `rootless-compat`，直接通过 Sileo/Zebra 安装。
+
+            ### 与 rootless 版的区别
+
+            | | rootless (Dopamine) | roothide (本包) |
+            |---|---|---|
+            | 安装路径前缀 | `/var/jb/` | jbroot (随机) |
+            | 依赖 | 无 | 无 (原生格式) |
+            | LaunchDaemon | 静态路径 plist | postinst 动态生成 |
+            | 包管理器 | Sileo/Zebra | Sileo/Zebra (roothide) |
 
             ### 产物说明
 
-            #### 一、Server（传统 frida-server 模式）
+            #### 一、Server
             | 文件 | 说明 |
             |---|---|
-            | `fs17910` | stealth server 主程序 (arm64e) |
-            | `fs17910d.dylib` | stealth agent 动态库 |
+            | `fs17910` | stealth server (arm64e) |
+            | `fs17910d.dylib` | stealth agent |
             | `fs17910h` | helper |
-            | `fs17910-gadget.dylib` | stealth Gadget（嵌入 IPA 用） |
-            | `fs17910_*_iphoneos-arm64.deb` | 一键安装包（自动启动） |
+            | `fs17910-gadget.dylib` | stealth Gadget |
+            | `fs17910_*_roothide.deb` | roothide 原生安装包 |
 
-            #### 二、GumJS Devkit（自编译 dylib，无 frida-server 特征）
+            #### 二、GumJS Devkit
             | 文件 | 说明 |
             |---|---|
-            | `stealth-frida-gumjs-devkit-*-ios-arm64e.tar.xz` | A12+ 真机 (iPhone XS 及以后) |
-            | `stealth-frida-gumjs-devkit-*-ios-arm64.tar.xz` | A8–A11 真机 (iPhone 6s ~ X) |
+            | `stealth-frida-gumjs-devkit-*-ios-arm64e.tar.xz` | A12+ (iPhone XS+) |
+            | `stealth-frida-gumjs-devkit-*-ios-arm64.tar.xz` | A8–A11 (iPhone 6s~X) |
             | `stealth-frida-gum-devkit-*-ios-arm64e.tar.xz` | C-only API (arm64e) |
             | `stealth-frida-gum-devkit-*-ios-arm64.tar.xz` | C-only API (arm64) |
 
-            每个 devkit 包含：
-            - `frida-gumjs.h` / `frida-gum.h` — 头文件
-            - `frida-gumjs.a` / `frida-gum.a` — 静态库（已去除 frida 特征字符串）
-            - `frida-gumjs-example.c` / `frida-gum-example.c` — 示例代码
-
-            ---
-
-            ### 用法一：deb 安装 stealth server（推荐入门）
-            ```bash
-            scp fs17910_*_iphoneos-arm64.deb root@DEVICE:/var/tmp/
-            ssh root@DEVICE "dpkg -i /var/tmp/fs17910_*.deb"
-            # 装完自动运行，重启设备也会自动拉起
-            ```
-
-            卸载：`ssh root@DEVICE "dpkg -r com.local.fs17910"`
-
-            ### 用法二：GumJS Devkit 自编译 Tweak（终极隐匿）
-
-            适用于 inline SVC 检测等 stealth server 也过不了的场景。
-            无 frida-server 进程、无特征线程、无特征端口。
+            ### 安装
 
             ```bash
-            # 1. 解压 devkit
-            tar xf stealth-frida-gumjs-devkit-*-ios-arm64e.tar.xz -C devkit/
-
-            # 2. 编译自定义 dylib
-            clang -isysroot $(xcrun --sdk iphoneos --show-sdk-path) \
-                  -target arm64e-apple-ios15.0 -shared \
-                  -o MyBypass.dylib bypass.c \
-                  -Ldevkit -lfrida-gumjs \
-                  -framework Foundation -lresolv -lpthread
-            strip -x MyBypass.dylib
-
-            # 3. 打包为 Substrate/ElleKit tweak 安装到设备
-            #    Filter plist 指定目标 bundle id
+            # 方式一：通过 Sileo/Zebra 导入 .deb 安装（推荐）
+            # 方式二：命令行
+            dpkg -i fs17910_*_roothide.deb
             ```
 
-            ### 电脑端连接（server 模式）
+            ### 卸载
+
+            ```bash
+            dpkg -r com.local.fs17910
+            ```
+
+            ### 电脑端连接
+
             ```bash
             frida -U -f com.target.app -l script.js
             frida -H DEVICE_IP:8899 -f com.target.app -l script.js
             ```
-
-            > 💡 GumJS devkit 的 .a 已经过 stealth patch，
-            > 静态链接进你的 dylib 后不含 "frida"/"gum-js-loop" 等特征字符串
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -557,10 +529,10 @@ jobs:
         run: |
           git clone https://x-access-token:${REPO_TOKEN}@github.com/rickbrian/repo.git /tmp/repo
           cd /tmp/repo
-          rm -f debs/fs17910_*_iphoneos-arm64.deb
-          cp "$GITHUB_WORKSPACE/release/"*.deb debs/
+          rm -f debs/fs17910_*_roothide.deb
+          cp "$GITHUB_WORKSPACE/release/"*_roothide.deb debs/
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Update fs17910 rootless ${FRIDA_VERSION}" || echo "No changes"
+          git commit -m "Update fs17910 roothide ${FRIDA_VERSION}" || echo "No changes"
           git push
