@@ -54,12 +54,7 @@ jobs:
           CODE=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/${TAG}")
-          if [ "$CODE" = "200" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Release already exists, skipping"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       # ── Delete old release on re-trigger ──
       - name: Delete existing release if re-trigger
