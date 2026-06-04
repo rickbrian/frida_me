@@ -395,9 +395,9 @@ jobs:
           chown root:wheel /Library/LaunchDaemons/com.local.fs17910.plist
           chmod 644 /Library/LaunchDaemons/com.local.fs17910.plist
 
-          # launchctl is a system tool — must use /rootfs prefix in roothide bootstrap
-          /rootfs/bin/launchctl unload "${PLIST_ABS}" 2>/dev/null || true
-          /rootfs/bin/launchctl load "${PLIST_ABS}"
+          # launchctl is a system tool — use /rootfs/usr/bin/ in roothide libvroot context
+          /rootfs/usr/bin/launchctl unload "${PLIST_ABS}" 2>/dev/null || true
+          /rootfs/usr/bin/launchctl load "${PLIST_ABS}"
           POSTEOF
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/postinst"
           chmod 0755 "$DEB_ROOT/DEBIAN/postinst"
@@ -406,7 +406,7 @@ jobs:
           cat > "$DEB_ROOT/DEBIAN/prerm" << 'PRERMEOF'
           #!/bin/bash
           PLIST_ABS="$(jbroot /Library/LaunchDaemons/com.local.fs17910.plist)"
-          /rootfs/bin/launchctl unload "${PLIST_ABS}" 2>/dev/null || true
+          /rootfs/usr/bin/launchctl unload "${PLIST_ABS}" 2>/dev/null || true
           killall fs17910 2>/dev/null || true
           rm -f /Library/LaunchDaemons/com.local.fs17910.plist 2>/dev/null || true
           exit 0
