@@ -418,7 +418,7 @@ jobs:
           Package: com.local.fs17910.rh
           Name: fs17910 (rh)
           Version: ${FRIDA_VERSION}
-          Architecture: iphoneos-arm64
+          Architecture: iphoneos-arm64e
           Description: system service daemon
           Maintainer: local
           Section: System
@@ -426,7 +426,7 @@ jobs:
           CTRLEOF
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/control"
 
-          dpkg-deb -b -Zxz "$DEB_ROOT" "release/fs17910_${FRIDA_VERSION}_iphoneos-arm64_roothide.deb"
+          dpkg-deb -b -Zxz "$DEB_ROOT" "release/fs17910_${FRIDA_VERSION}_iphoneos-arm64e_roothide.deb"
 
           # ── Devkit tar.xz 打包 ──
           for arch in arm64e arm64; do
@@ -529,7 +529,7 @@ jobs:
         run: |
           git clone https://x-access-token:${REPO_TOKEN}@github.com/rickbrian/repo.git /tmp/repo
           cd /tmp/repo
-          rm -f debs/fs17910_*_roothide.deb
+          rm -f debs/fs17910_*_roothide.deb debs/fs17910_*_iphoneos-arm64e_roothide.deb
           cp "$GITHUB_WORKSPACE/release/"*_roothide.deb debs/
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
