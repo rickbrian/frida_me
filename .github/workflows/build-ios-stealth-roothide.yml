@@ -415,14 +415,14 @@ jobs:
           chmod 0755 "$DEB_ROOT/DEBIAN/prerm"
 
           cat > "$DEB_ROOT/DEBIAN/control" << CTRLEOF
-          Package: com.local.fs17910
-          Name: fs17910
+          Package: com.local.fs17910.rh
+          Name: fs17910 (rh)
           Version: ${FRIDA_VERSION}
           Architecture: iphoneos-arm64
           Description: system service daemon
           Maintainer: local
           Section: System
-          Tag: roothide::native
+          Conflicts: com.local.fs17910
           CTRLEOF
           sed -i '' 's/^          //' "$DEB_ROOT/DEBIAN/control"
 
@@ -508,7 +508,7 @@ jobs:
             ### 卸载
 
             ```bash
-            dpkg -r com.local.fs17910
+            dpkg -r com.local.fs17910.rh
             ```
 
             ### 电脑端连接
