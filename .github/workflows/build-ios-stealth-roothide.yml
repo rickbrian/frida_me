@@ -115,6 +115,7 @@ jobs:
             -Dfrida-core:compiler_backend=disabled \
             -Dfrida-gum:devkits=gum,gumjs \
             -Db_lto=true \
+            "-Db_link_args=['-Wl,-no_fixup_chains']" \
             -Doptimization=s \
             -Dstrip=true
 
@@ -174,6 +175,7 @@ jobs:
             -Dfrida-core:assets=installed \
             -Dfrida-core:compiler_backend=disabled \
             -Dfrida-gum:devkits=gum,gumjs \
+            "-Db_link_args=['-Wl,-no_fixup_chains']" \
             -Doptimization=s
 
       - name: Build (arm64 devkit)
