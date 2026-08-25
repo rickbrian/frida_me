@@ -97,6 +97,7 @@ jobs:
         env:
           IOS_CERTID: "-"
           MACOS_CERTID: "-"
+          LDFLAGS: "-Wl,-no_fixup_chains"
         run: |
           ./configure \
             --prefix=/var/jb/usr \
@@ -108,7 +109,6 @@ jobs:
             -Dfrida-core:compiler_backend=disabled \
             -Dfrida-gum:devkits=gum,gumjs \
             -Db_lto=true \
-            "-Db_link_args=['-Wl,-no_fixup_chains']" \
             -Doptimization=s \
             -Dstrip=true
 
@@ -170,6 +170,7 @@ jobs:
         env:
           IOS_CERTID: "-"
           MACOS_CERTID: "-"
+          LDFLAGS: "-Wl,-no_fixup_chains"
         run: |
           rm -rf build
           ./configure \
@@ -178,7 +179,6 @@ jobs:
             -Dfrida-core:assets=installed \
             -Dfrida-core:compiler_backend=disabled \
             -Dfrida-gum:devkits=gum,gumjs \
-            "-Db_link_args=['-Wl,-no_fixup_chains']" \
             -Doptimization=s
 
       - name: Build (arm64 devkit)
