@@ -108,7 +108,6 @@ jobs:
             -Dfrida-core:assets=installed \
             -Dfrida-core:compiler_backend=disabled \
             -Dfrida-gum:devkits=gum,gumjs \
-            -Db_lto=true \
             -Doptimization=s \
             -Dstrip=true
 
